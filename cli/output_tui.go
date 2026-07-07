@@ -355,7 +355,8 @@ func (m bubbleModel[T]) View() tea.View {
 	)
 	view := tea.NewView(content)
 	view.AltScreen = true
-	view.MouseMode = tea.MouseModeCellMotion
+	// Let the terminal own mouse drag selection so users can copy text from the TUI.
+	view.MouseMode = tea.MouseModeNone
 	return view
 }
 
