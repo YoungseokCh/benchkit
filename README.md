@@ -1,7 +1,6 @@
 # benchkit
 
-`benchkit` is a Go benchmark harness split into a dependency-light core package
-and an optional Bubble Tea CLI package.
+`benchkit` is a Go benchmark harness for arbitrary benchmark run.
 
 Users provide:
 
