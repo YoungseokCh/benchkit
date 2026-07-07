@@ -1,6 +1,6 @@
 package cli
 
-import "benchkit"
+import "github.com/YoungseokCh/benchkit"
 
 type Benchmark[T any] = benchkit.Benchmark[T]
 type Case = benchkit.Case

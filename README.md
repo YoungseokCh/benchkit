@@ -1,44 +1,214 @@
 # benchkit
 
-`benchkit` is a Go benchmark harness for arbitrary benchmark run.
+`benchkit` is a Go benchmark harness for arbitrary benchmark suites. You define
+the cases and the per-case runner; benchkit handles filtering, bounded
+parallelism, per-case timing, aggregation, terminal output, and JSON/JSONL
+reporting.
 
-Users provide:
+## Install
 
-- `Runner[T]`: executes one arbitrary benchmark case and returns a `CaseReport[T]`.
-- `Aggregator[T]`: observes results and returns any final summary object.
-- `CLI[T]`: adds interactive selection plus JSON or JSONL machine output.
+Install the module:
 
-`PASS`, `FAIL`, `ERROR`, and `SKIP` are framework presets for default counting
-and exit-code behavior. They are optional. Domain-specific results such as
-coverage, precision, recall, cost, or latency distributions can leave status
-empty and report through `CaseReport.Metrics` plus a custom `Aggregator[T]`.
-Aggregators also expose `Snapshot()` so the TUI and JSONL output can show live
-aggregate values while cases are still running.
+```sh
+go get github.com/YoungseokCh/benchkit
+```
+
+Then import the core package and, when building a command-line benchmark, the
+CLI helper package:
 
 ```go
-import "benchkit"
+import (
+	benchkit "github.com/YoungseokCh/benchkit"
+	benchkitcli "github.com/YoungseokCh/benchkit/cli"
+)
+```
 
-suite := benchkit.Benchmark[int]{
-	Name: "example",
-	Cases: []benchkit.Case{
-		{Name: "small", Tags: []string{"smoke"}, Meta: map[string]string{"n": "10"}},
-	},
-	RunCase: func(ctx context.Context, c benchkit.Case) (benchkit.CaseReport[int], error) {
-		got := 10
-		if got == 10 {
-			return benchkit.CaseReport[int]{Output: got, Status: benchkit.StatusPass}, nil
-		}
-		return benchkit.CaseReport[int]{
-			Output: got,
-			Status: benchkit.StatusFail,
-			Message: "unexpected result",
-		}, nil
-	},
-	Aggregator: &benchkit.SummaryAggregator[int]{},
+## Core Concepts
+
+- `Case`: one benchmark input. Put lightweight string metadata in `Meta`, or
+  close over richer data from your runner.
+- `Runner[T]`: executes one `Case` and returns a typed `CaseReport[T]`.
+- `CaseReport[T]`: carries your typed output, optional status, message, and
+  numeric metrics.
+- `Aggregator[T]`: observes completed results and returns any JSON-marshalable
+  final summary.
+- `CLI[T]`: exposes filtering, interactive selection, TUI progress, JSON, and
+  JSONL output for your suite.
+
+`StatusPass`, `StatusFail`, `StatusError`, and `StatusSkip` are optional
+framework statuses. They drive default pass/fail counts and CLI exit codes. If
+your benchmark is not a pass/fail test, leave `Status` empty and report through
+`Output`, `Metrics`, and a custom aggregator.
+
+## Minimal Library Usage
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+
+	benchkit "github.com/YoungseokCh/benchkit"
+)
+
+type result struct {
+	Input int `json:"input"`
+	Value int `json:"value"`
 }
 
-summary, err := suite.Run(context.Background(), benchkit.RunOptions[int]{Parallel: 4})
+func main() {
+	suite := benchkit.Benchmark[result]{
+		Name: "example",
+		Cases: []benchkit.Case{
+			{Name: "small", Tags: []string{"smoke"}, Meta: map[string]string{"n": "10"}},
+			{Name: "large", Tags: []string{"full"}, Meta: map[string]string{"n": "100"}},
+		},
+		RunCase: func(ctx context.Context, c benchkit.Case) (benchkit.CaseReport[result], error) {
+			n, err := strconv.Atoi(c.Meta["n"])
+			if err != nil {
+				return benchkit.CaseReport[result]{}, err
+			}
+
+			value := n * 2
+			report := benchkit.CaseReport[result]{
+				Output: result{Input: n, Value: value},
+				Metrics: map[string]float64{
+					"value": float64(value),
+				},
+			}
+			if value <= 200 {
+				report.Status = benchkit.StatusPass
+			} else {
+				report.Status = benchkit.StatusFail
+				report.Message = "value exceeded limit"
+			}
+			return report, nil
+		},
+		Aggregator: &benchkit.SummaryAggregator[result]{},
+	}
+
+	summary, err := suite.Run(context.Background(), benchkit.RunOptions[result]{
+		Parallel: 4,
+		Tags:     []string{"smoke"},
+	})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("%s: %d passed, %d failed\n", summary.Name, summary.Passed, summary.Failed)
+}
 ```
+
+## Build a Benchmark CLI
+
+Most benchmark programs should wrap the suite with `benchkitcli.CLI[T]`:
+
+```go
+package main
+
+import (
+	"context"
+	"os"
+
+	benchkit "github.com/YoungseokCh/benchkit"
+	benchkitcli "github.com/YoungseokCh/benchkit/cli"
+)
+
+func main() {
+	suite := benchkit.Benchmark[myOutput]{
+		Name:       "my-benchmark",
+		Cases:      makeCases(),
+		RunCase:    runCase,
+		Aggregator: &benchkit.SummaryAggregator[myOutput]{},
+	}
+
+	err := benchkitcli.CLI[myOutput]{
+		Benchmark:    suite,
+		RecentFilter: benchkitcli.RecentFailed[myOutput],
+	}.Run(context.Background(), os.Args[1:])
+	os.Exit(benchkitcli.ExitCode(err))
+}
+```
+
+The CLI supports:
+
+- `-parallel N`: run up to `N` cases concurrently.
+- `-case a,b`: run exact case names.
+- `-tag smoke,linux`: require all listed tags.
+- `-match text`: substring match on case name.
+- `-list`: list selected cases without running.
+- `-interactive`: prompt for case selection.
+- `-tui=false`: disable the terminal UI and print plain progress lines.
+- `-json`: write the final summary as JSON.
+- `-jsonl`: stream lifecycle events as JSON lines.
+
+The default terminal output uses a Bubble Tea TUI with whole-terminal progress,
+suite ETA, pass/fail counts, stable worker meters, aggregate snapshots, and a
+scrollable recent-results viewport. Redirected output stays plain and
+line-oriented so CI logs remain readable.
+
+TUI keys:
+
+- `k` or up arrow: scroll recent results older.
+- `j` or down arrow: scroll recent results newer.
+- `PageUp` / `PageDown`: scroll by one viewport.
+- `g` / `Home`: jump to oldest recent result.
+- `G` / `End`: jump to newest recent result.
+- `q` / `Ctrl+C`: exit after the benchmark finishes.
+- `?`: toggle help.
+
+## Custom Aggregation
+
+Use a custom `Aggregator[T]` when pass/fail counts are not enough. Aggregators
+see every completed result through `Observe`, can expose live TUI/JSONL state
+through `Snapshot`, and return the final `Summary.Aggregated` payload from
+`Finalize`.
+
+```go
+type coverageOutput struct {
+	TotalUnits   int `json:"total_units"`
+	CoveredUnits int `json:"covered_units"`
+}
+
+type coverageAggregator struct {
+	totalUnits   int
+	coveredUnits int
+}
+
+func (a *coverageAggregator) Observe(result benchkit.CaseResult[coverageOutput]) error {
+	a.totalUnits += result.Output.TotalUnits
+	a.coveredUnits += result.Output.CoveredUnits
+	return nil
+}
+
+func (a *coverageAggregator) Snapshot() any {
+	coverage := 0.0
+	if a.totalUnits > 0 {
+		coverage = float64(a.coveredUnits) / float64(a.totalUnits)
+	}
+	return benchkit.Stats{
+		{
+			Title: "coverage",
+			Items: []benchkit.StatItem{
+				{Label: "total_units", Value: a.totalUnits},
+				{Label: "covered_units", Value: a.coveredUnits},
+				{Label: "coverage", Value: coverage},
+			},
+		},
+	}
+}
+
+func (a *coverageAggregator) Finalize(summary benchkit.Summary[coverageOutput]) (any, error) {
+	return a.Snapshot(), nil
+}
+```
+
+`benchkit.Stats` is optional, but returning it gives the terminal output a
+structured way to render compact key/value sections and tables. Aggregators can
+return any JSON-marshalable value.
+
+## Examples
 
 Run the bundled testing example. It generates 120 synthetic jobs with mixed
 durations and pass/fail oracle results:
@@ -61,31 +231,3 @@ go run ./example/coverage -parallel 16
 go run ./example/coverage -json
 go run ./example/coverage -tag low
 ```
-
-CLI flags supported by `benchkitcli.CLI[T]`:
-
-- `-interactive`: prompt for case selection.
-- `-parallel N`: run up to `N` cases concurrently.
-- `-tui=false`: disable the terminal UI and print plain progress lines.
-- `-case a,b`: run exact case names.
-- `-tag smoke,linux`: require all listed tags.
-- `-match text`: substring match on case name.
-- `-list`: list selected cases without running.
-- `-json`: write final summary as JSON.
-- `-jsonl`: stream lifecycle events as JSON lines.
-
-Default terminal output uses a Bubble Tea TUI with the whole terminal screen:
-progress, suite ETA, pass/fail counts, htop-style stable worker meters, and a
-scrollable recent results viewport that fills the remaining screen height.
-Worker meter progress is estimated from the average completed case duration.
-Redirected output stays plain line-oriented so CI logs remain readable.
-
-TUI keys:
-
-- `k` or up arrow: scroll recent results older.
-- `j` or down arrow: scroll recent results newer.
-- `PageUp` / `PageDown`: scroll by one viewport.
-- `g` / `Home`: jump to oldest recent result.
-- `G` / `End`: jump to newest recent result.
-- `q` / `Ctrl+C`: exit after the benchmark finishes.
-- `?`: toggle help.

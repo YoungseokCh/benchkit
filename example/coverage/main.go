@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"benchkit"
-	benchkitcli "benchkit/cli"
+	"github.com/YoungseokCh/benchkit"
+	benchkitcli "github.com/YoungseokCh/benchkit/cli"
 )
 
 type coverageOutput struct {

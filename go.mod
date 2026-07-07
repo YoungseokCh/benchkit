@@ -1,4 +1,4 @@
-module benchkit
+module github.com/YoungseokCh/benchkit
 
 go 1.25.0
 
