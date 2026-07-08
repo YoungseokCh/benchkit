@@ -266,14 +266,7 @@ func (m *model[T]) configureViewport() {
 	if width <= 0 {
 		width = 80
 	}
-	height := m.panelHeight() - 2
-	if height < 1 {
-		height = 1
-	}
-	viewportWidth := width - 3
-	if viewportWidth < 1 {
-		viewportWidth = 1
-	}
+	viewportWidth, height := components.PanelViewportSize(width, m.panelHeight())
 	m.viewport.SetWidth(viewportWidth)
 	m.viewport.SetHeight(height)
 }
@@ -388,6 +381,7 @@ func (m *model[T]) resetViewportForTab() {
 }
 
 func (m *model[T]) handleViewportKey(msg tea.KeyPressMsg) bool {
+	m.configureViewport()
 	switch msg.String() {
 	case "down", "j":
 		m.viewport.ScrollDown(1)
@@ -428,6 +422,7 @@ func (m *model[T]) handleViewportKey(msg tea.KeyPressMsg) bool {
 }
 
 func (m *model[T]) handleViewportMouse(msg tea.MouseWheelMsg) bool {
+	m.configureViewport()
 	switch msg.Mouse().Button {
 	case tea.MouseWheelUp:
 		m.viewport.ScrollUp(m.viewport.MouseWheelDelta)

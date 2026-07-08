@@ -152,6 +152,14 @@ func TestModelStatsTabUsesSharedScrollableViewport(t *testing.T) {
 	}
 	m.viewport.GotoTop()
 
+	m.viewport.SetHeight(100)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = updated.(model[struct{}])
+	if m.viewport.YOffset() == 0 {
+		t.Fatal("stats viewport did not scroll after stale viewport height")
+	}
+	m.viewport.GotoTop()
+
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	m = updated.(model[struct{}])
 	if m.viewport.YOffset() == 0 {

@@ -22,9 +22,39 @@ type Panel struct {
 func (p Panel) View() string {
 	body := p.Body
 	if p.Viewport != nil {
+		width, height := PanelViewportSize(p.Width, p.Height)
+		p.Viewport.SetWidth(width)
+		p.Viewport.SetHeight(height)
 		body = p.Viewport.View()
 	}
 	return panel(p.Title, p.Tabs, body, p.Width, p.Height, p.Viewport)
+}
+
+// PanelViewportSize returns the viewport dimensions for a panel body.
+func PanelViewportSize(width int, height int) (int, int) {
+	return panelViewportWidth(width), panelViewportHeight(height)
+}
+
+func panelViewportWidth(width int) int {
+	if width < 20 {
+		width = 20
+	}
+	viewportWidth := width - 3
+	if viewportWidth < 1 {
+		return 1
+	}
+	return viewportWidth
+}
+
+func panelViewportHeight(height int) int {
+	if height < 3 {
+		height = 3
+	}
+	viewportHeight := height - 2
+	if viewportHeight < 1 {
+		return 1
+	}
+	return viewportHeight
 }
 
 func panel(title string, tabs []Tab, body string, width int, height int, view *viewport.Model) string {
@@ -98,12 +128,11 @@ func Footer(finished bool, hints string) string {
 
 func scrollbarCell(view viewport.Model, row int, height int) string {
 	total := view.TotalLineCount()
-	visible := view.VisibleLineCount()
-	if height <= 0 || total <= visible || visible <= 0 {
+	if height <= 0 || total <= height {
 		return mutedStyle.Render(" ")
 	}
 
-	thumbHeight := visible * height / total
+	thumbHeight := height * height / total
 	if thumbHeight < 1 {
 		thumbHeight = 1
 	}
