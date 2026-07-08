@@ -94,7 +94,7 @@ func main() {
 
 	err := benchkitcli.CLI[jobOutput]{
 		Benchmark: suite,
-		RecentFilter: func(result benchkit.CaseResult[jobOutput]) bool {
+		StreamFilter: func(result benchkit.CaseResult[jobOutput]) bool {
 			return result.State == benchkit.StateError || !result.Output.Passed
 		},
 	}.Run(context.Background(), os.Args[1:])

@@ -27,27 +27,47 @@ type model[T any] struct {
 	startedAt    time.Time
 	finished     bool
 	workers      []components.WorkerSlot
-	recent       []string
-	recentFilter RecentFilter[T]
+	stream       []streamLine
+	streamFilter StreamFilter[T]
 	followRecent bool
+	showHidden   bool
+	activeTab    viewTab
+	streamMode   streamMode
 	viewport     viewport.Model
 }
 
-func newModel[T any](e benchkit.SuiteEvent, recentFilter RecentFilter[T]) model[T] {
+type viewTab int
+
+const (
+	viewTabStats viewTab = iota
+	viewTabStream
+)
+
+type streamMode int
+
+const (
+	streamModePlain streamMode = iota
+	streamModeJSON
+)
+
+func newModel[T any](e benchkit.SuiteEvent, streamFilter StreamFilter[T]) model[T] {
 	model := model[T]{
 		name:         e.Name,
 		total:        e.Total,
 		parallel:     e.Parallel,
 		startedAt:    time.Now(),
 		workers:      make([]components.WorkerSlot, e.Parallel),
-		recentFilter: recentFilter,
+		streamFilter: streamFilter,
 		followRecent: true,
+		activeTab:    viewTabStream,
+		streamMode:   streamModePlain,
 		viewport:     viewport.New(),
 		width:        80,
 		height:       24,
 	}
 	model.viewport.MouseWheelDelta = 1
 	model.configureViewport()
+	model.refreshStream()
 	return model
 }
 
@@ -67,6 +87,30 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "tab":
+			m.nextTab()
+			m.configureViewport()
+		case "shift+tab":
+			m.previousTab()
+			m.configureViewport()
+		case "1", "s":
+			m.activeTab = viewTabStats
+			m.configureViewport()
+		case "2", "o":
+			m.activeTab = viewTabStream
+			m.configureViewport()
+		case "m":
+			m.toggleStreamMode()
+			m.refreshStream()
+		case "p":
+			m.streamMode = streamModePlain
+			m.refreshStream()
+		case "r":
+			m.streamMode = streamModeJSON
+			m.refreshStream()
+		case "a":
+			m.showHidden = !m.showHidden
+			m.refreshStream()
 		case "up", "k", "pgup", "b", "u", "ctrl+u", "home":
 			m.followRecent = false
 		case "end":
@@ -90,23 +134,21 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case caseStartedMsg:
 		m.applyCaseStarted(msg.event)
 	case caseFinishedMsg[T]:
-		if m.applyCaseFinished(msg.event) {
-			m.refreshRecent()
-		}
+		m.applyCaseFinished(msg.event)
+		m.refreshStream()
 	case batchMsg[T]:
-		needsRecentRefresh := false
+		needsStreamRefresh := false
 		for _, event := range msg.events {
 			switch {
 			case event.started != nil:
 				m.applyCaseStarted(*event.started)
 			case event.finished != nil:
-				if m.applyCaseFinished(*event.finished) {
-					needsRecentRefresh = true
-				}
+				m.applyCaseFinished(*event.finished)
+				needsStreamRefresh = true
 			}
 		}
-		if needsRecentRefresh {
-			m.refreshRecent()
+		if needsStreamRefresh {
+			m.refreshStream()
 		}
 		if msg.hasAggregate {
 			m.aggregate = components.FormatAggregateTable(msg.aggregate, m.aggregateWidth())
@@ -118,7 +160,7 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.skipped = msg.summary.Skipped
 		m.aggregate = components.FormatAggregateTable(msg.summary.Aggregated, m.aggregateWidth())
 		m.finished = true
-		m.refreshRecent()
+		m.refreshStream()
 	case aggregateUpdatedMsg:
 		m.aggregate = components.FormatAggregateTable(msg.snapshot, m.aggregateWidth())
 	}
@@ -146,7 +188,7 @@ func (m *model[T]) applyCaseStarted(event benchkit.WorkerCaseEvent) {
 	}
 }
 
-func (m *model[T]) applyCaseFinished(event benchkit.WorkerCaseResult[T]) bool {
+func (m *model[T]) applyCaseFinished(event benchkit.WorkerCaseResult[T]) {
 	result := event.Result
 	if event.WorkerID >= 0 && event.WorkerID < len(m.workers) {
 		current := m.workers[event.WorkerID]
@@ -168,22 +210,15 @@ func (m *model[T]) applyCaseFinished(event benchkit.WorkerCaseResult[T]) bool {
 	default:
 		m.errors++
 	}
-	if m.recentFilter == nil || m.recentFilter(result) {
-		m.recent = append(m.recent, components.ResultLine(result))
-		return true
-	}
-	return false
+	line := caseFinishedStreamLine(event)
+	line.Hide = !m.showCompletedResult(result)
+	m.stream = append(m.stream, line)
 }
 
 func (m model[T]) View() tea.View {
 	m.configureViewport()
 
-	aggregate := ""
-	if m.aggregate != "" {
-		aggregate = components.Block("", m.aggregate, m.width)
-	}
-
-	recent := components.ViewportBlock(m.viewport.View(), m.viewport, m.width, m.viewport.Height())
+	panel := m.panelView()
 
 	sections := []string{
 		"",
@@ -199,15 +234,12 @@ func (m model[T]) View() tea.View {
 			Width:     m.width,
 		}),
 		"",
-		m.workerView(),
-	}
-	if aggregate != "" {
-		sections = append(sections, aggregate)
+		m.workerGrid().View(),
+		"",
+		panel,
 	}
 	sections = append(sections,
-		"",
-		recent,
-		components.Footer(m.finished),
+		components.Footer(m.finished, "tab switches view  1/s stats  2/o stream  a reveal hidden  m mode  p plain  r json"),
 	)
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 	view := tea.NewView(content)
@@ -222,7 +254,7 @@ func (m *model[T]) configureViewport() {
 	if width <= 0 {
 		width = 80
 	}
-	height := m.height - m.fixedRows()
+	height := m.panelHeight() - 2
 	if height < 1 {
 		height = 1
 	}
@@ -234,30 +266,72 @@ func (m *model[T]) configureViewport() {
 	m.viewport.SetHeight(height)
 }
 
-func (m model[T]) fixedRows() int {
-	rows := 7 + m.workerRows()
-	if m.aggregate != "" {
-		rows += components.LineCount(components.Block("", m.aggregate, m.width))
+func (m model[T]) workerGrid() components.WorkerGrid {
+	return components.WorkerGrid{
+		Workers:     m.workers,
+		Width:       m.width,
+		Completed:   m.completed,
+		TotalCaseMS: m.totalCaseMS,
 	}
-	return rows
 }
 
-func (m model[T]) workerRows() int {
-	return components.WorkerGrid{
-		Workers:     m.workers,
-		Width:       m.width,
-		Completed:   m.completed,
-		TotalCaseMS: m.totalCaseMS,
-	}.Rows()
+func (m model[T]) panelHeight() int {
+	height := m.height - 6 - m.workerGrid().Rows()
+	if height < 3 {
+		height = 3
+	}
+	return height
 }
 
-func (m model[T]) workerView() string {
-	return components.WorkerGrid{
-		Workers:     m.workers,
-		Width:       m.width,
-		Completed:   m.completed,
-		TotalCaseMS: m.totalCaseMS,
-	}.View()
+func (m model[T]) panelView() string {
+	switch m.activeTab {
+	case viewTabStream:
+		return components.Panel{
+			Title:    "stream",
+			Tabs:     m.tabs(),
+			Width:    m.width,
+			Height:   m.panelHeight(),
+			Viewport: &m.viewport,
+		}.View()
+	case viewTabStats:
+		return components.Panel{
+			Title:  "stats",
+			Tabs:   m.tabs(),
+			Body:   m.statsBody(),
+			Width:  m.width,
+			Height: m.panelHeight(),
+		}.View()
+	default:
+		return ""
+	}
+}
+
+func (m model[T]) tabs() []components.Tab {
+	return []components.Tab{
+		{Label: "stats", Active: m.activeTab == viewTabStats},
+		{Label: m.streamTabLabel(), Active: m.activeTab == viewTabStream},
+	}
+}
+
+func (m model[T]) statsBody() string {
+	stats := m.aggregate
+	if stats == "" {
+		stats = "waiting for stats"
+	}
+	return stats
+}
+
+func (m model[T]) streamTabLabel() string {
+	suffix := ""
+	if m.hiddenStreamCount() > 0 && !m.showHidden {
+		suffix = ":filtered"
+	}
+	switch m.streamMode {
+	case streamModeJSON:
+		return "stream:json" + suffix
+	default:
+		return "stream:plain" + suffix
+	}
 }
 
 func (m model[T]) suiteETA() string {
@@ -279,11 +353,69 @@ func (m model[T]) aggregateWidth() int {
 	return m.width - 2
 }
 
-func (m *model[T]) refreshRecent() {
-	m.viewport.SetContent(strings.Join(m.recent, "\n"))
+func (m *model[T]) refreshStream() {
+	m.viewport.SetContent(strings.Join(m.streamLines(), "\n"))
 	if m.followRecent {
 		m.viewport.GotoBottom()
 	}
+}
+
+func (m model[T]) streamLines() []string {
+	lines := make([]string, 0, len(m.stream))
+	for _, line := range m.stream {
+		if line.Hide && !m.showHidden {
+			continue
+		}
+		switch m.streamMode {
+		case streamModeJSON:
+			lines = append(lines, line.JSON)
+		default:
+			lines = append(lines, line.Plain)
+		}
+	}
+	return lines
+}
+
+func (m *model[T]) nextTab() {
+	switch m.activeTab {
+	case viewTabStats:
+		m.activeTab = viewTabStream
+	default:
+		m.activeTab = viewTabStats
+	}
+}
+
+func (m *model[T]) previousTab() {
+	m.nextTab()
+}
+
+func (m *model[T]) toggleStreamMode() {
+	switch m.streamMode {
+	case streamModePlain:
+		m.streamMode = streamModeJSON
+	default:
+		m.streamMode = streamModePlain
+	}
+}
+
+func (m model[T]) showCompletedResult(result benchkit.CaseResult[T]) bool {
+	if result.State == benchkit.StateError || result.Error != "" {
+		return true
+	}
+	if m.streamFilter == nil {
+		return true
+	}
+	return m.streamFilter(result)
+}
+
+func (m model[T]) hiddenStreamCount() int {
+	count := 0
+	for _, line := range m.stream {
+		if line.Hide {
+			count++
+		}
+	}
+	return count
 }
 
 func tick() tea.Cmd {

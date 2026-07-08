@@ -20,18 +20,19 @@ import (
 //	os.Exit(benchkitcli.ExitCode(benchkitcli.CLI[MyOutput]{Benchmark: suite}.Run(ctx, os.Args[1:])))
 type CLI[T any] struct {
 	Benchmark    Benchmark[T]
-	RecentFilter RecentFilter[T]
+	StreamFilter StreamFilter[T]
 	In           io.Reader
 	Out          io.Writer
 	Err          io.Writer
 }
 
-// RecentFilter decides whether a completed case should appear in the TUI
-// recent-results viewport. It does not affect aggregation or final summaries.
-type RecentFilter[T any] func(CaseResult[T]) bool
+// StreamFilter decides whether a non-error completed case should appear in the
+// TUI stream viewport. Errored cases are always shown. It does not affect
+// aggregation or final summaries.
+type StreamFilter[T any] func(CaseResult[T]) bool
 
-// RecentErrors shows errored cases in the TUI recent-results viewport.
-func RecentErrors[T any](result CaseResult[T]) bool {
+// StreamErrors shows only errored cases in the TUI stream viewport.
+func StreamErrors[T any](result CaseResult[T]) bool {
 	return result.State == StateError || result.Error != ""
 }
 
@@ -99,11 +100,11 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 		if tui && isTerminal(out) && isTerminal(in) {
 			runCtx, cancel = context.WithCancel(ctx)
 			defer cancel()
-			var recent tuipkg.RecentFilter[T]
-			if c.RecentFilter != nil {
-				recent = tuipkg.RecentFilter[T](c.RecentFilter)
+			var streamFilter tuipkg.StreamFilter[T]
+			if c.StreamFilter != nil {
+				streamFilter = tuipkg.StreamFilter[T](c.StreamFilter)
 			}
-			bubble = tuipkg.NewSink[T](out, in, cancel, recent)
+			bubble = tuipkg.NewSink[T](out, in, cancel, streamFilter)
 			sink = bubble
 		} else {
 			sink = newPlainSink[T](out)

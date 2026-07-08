@@ -7,60 +7,62 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Block renders a bordered text block.
-func Block(title string, body string, width int) string {
-	if body == "" {
-		return ""
-	}
-	if width < 20 {
-		width = 20
-	}
-	innerWidth := width - 2
-	title = truncate(title, innerWidth)
-	topFill := innerWidth - lipgloss.Width(title)
-	if topFill < 0 {
-		topFill = 0
-	}
-
-	top := mutedStyle.Render("╭" + strings.Repeat("─", innerWidth) + "╮")
-	if title != "" {
-		top = mutedStyle.Render("╭") + sectionStyle.Render(title) + mutedStyle.Render(strings.Repeat("─", topFill)+"╮")
-	}
-	lines := []string{top}
-	for _, line := range strings.Split(body, "\n") {
-		lines = append(lines, mutedStyle.Render("│")+padRight(truncate(line, innerWidth), innerWidth)+mutedStyle.Render("│"))
-	}
-	lines = append(lines, mutedStyle.Render("╰"+strings.Repeat("─", innerWidth)+"╯"))
-	return strings.Join(lines, "\n")
+// Panel renders a fixed-height bordered panel. When Viewport is set, the panel
+// includes a scrollbar cell and uses the viewport's visible content as its body.
+type Panel struct {
+	Title    string
+	Tabs     []Tab
+	Body     string
+	Width    int
+	Height   int
+	Viewport *viewport.Model
 }
 
-// ViewportBlock renders the recent results viewport with a scrollbar.
-func ViewportBlock(body string, view viewport.Model, width int, height int) string {
+// View renders the panel.
+func (p Panel) View() string {
+	body := p.Body
+	if p.Viewport != nil {
+		body = p.Viewport.View()
+	}
+	return panel(p.Title, p.Tabs, body, p.Width, p.Height, p.Viewport)
+}
+
+func panel(title string, tabs []Tab, body string, width int, height int, view *viewport.Model) string {
 	if width < 20 {
 		width = 20
 	}
-	if height < 1 {
-		height = 1
+	if height < 3 {
+		height = 3
 	}
 	innerWidth := width - 2
-	contentWidth := innerWidth - 1
+	innerHeight := height - 2
+	title = truncate(title, innerWidth)
+
+	top := panelTop(title, tabs, innerWidth)
+	contentWidth := innerWidth
+	if view != nil {
+		contentWidth = innerWidth - 1
+	}
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 
 	bodyLines := strings.Split(body, "\n")
-
-	lines := []string{mutedStyle.Render("╭" + strings.Repeat("─", innerWidth) + "╮")}
-	for i := 0; i < height; i++ {
+	lines := []string{top}
+	for i := 0; i < innerHeight; i++ {
 		line := ""
 		if i < len(bodyLines) {
 			line = bodyLines[i]
+		}
+		scrollbar := ""
+		if view != nil {
+			scrollbar = scrollbarCell(*view, i, innerHeight)
 		}
 		lines = append(
 			lines,
 			mutedStyle.Render("│")+
 				padRight(truncate(line, contentWidth), contentWidth)+
-				scrollbarCell(view, i, height)+
+				scrollbar+
 				mutedStyle.Render("│"),
 		)
 	}
@@ -68,12 +70,30 @@ func ViewportBlock(body string, view viewport.Model, width int, height int) stri
 	return strings.Join(lines, "\n")
 }
 
-// Footer renders the TUI keyboard hint footer.
-func Footer(finished bool) string {
-	if finished {
-		return mutedStyle.Render("scroll arrows/j/k/pageup/pagedown  q/ctrl+c exits after finish")
+func panelTop(title string, tabs []Tab, innerWidth int) string {
+	header := ""
+	if len(tabs) > 0 {
+		header = RenderTabs(tabs)
+	} else if title != "" {
+		header = sectionStyle.Render(title)
 	}
-	return mutedStyle.Render("scroll arrows/j/k/pageup/pagedown  q/ctrl+c exits")
+	fill := innerWidth - lipgloss.Width(header)
+	if fill < 0 {
+		fill = 0
+	}
+	return mutedStyle.Render("╭") + header + mutedStyle.Render(strings.Repeat("─", fill)+"╮")
+}
+
+// Footer renders the TUI keyboard hint footer.
+func Footer(finished bool, hints string) string {
+	prefix := hints
+	if prefix != "" {
+		prefix += "  "
+	}
+	if finished {
+		return mutedStyle.Render(prefix + "scroll arrows/j/k/pageup/pagedown  q/ctrl+c exits after finish")
+	}
+	return mutedStyle.Render(prefix + "scroll arrows/j/k/pageup/pagedown  q/ctrl+c exits")
 }
 
 func scrollbarCell(view viewport.Model, row int, height int) string {

@@ -86,7 +86,7 @@ func formatStatsTable(stats []any, width int) string {
 
 		var parts []string
 		if items, ok := stat["items"].([]any); ok {
-			var rows [][2]string
+			var rows [][]string
 			for _, rawItem := range items {
 				item, ok := rawItem.(map[string]any)
 				if !ok {
@@ -96,10 +96,10 @@ func formatStatsTable(stats []any, width int) string {
 				if label == "" {
 					continue
 				}
-				rows = append(rows, [2]string{label, formatStatValue(item["value"])})
+				rows = append(rows, []string{label, formatStatValue(item["value"])})
 			}
 			if len(rows) > 0 {
-				parts = append(parts, formatAggregateRows(rows, width))
+				parts = append(parts, formatTable([]string{"label", "value"}, rows, width))
 			}
 		}
 

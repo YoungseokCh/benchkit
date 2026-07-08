@@ -54,7 +54,7 @@ type Aggregator[T any] interface {
 
 // Stats is an optional first-class aggregate display model. Aggregators can
 // still return any JSON-marshalable value, but returning Stats lets terminal
-// output distinguish compact key/value sections from true tables.
+// output distinguish stat items from true tables.
 type Stats []Stat
 
 // Stat is one aggregate display section.

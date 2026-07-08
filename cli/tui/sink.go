@@ -12,16 +12,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// RecentFilter decides whether a completed case should appear in the recent
-// results viewport. It does not affect aggregation or final summaries.
-type RecentFilter[T any] func(benchkit.CaseResult[T]) bool
+// StreamFilter decides whether a non-error completed case should appear in the
+// stream viewport. Errored cases are always shown. It does not affect
+// aggregation or final summaries.
+type StreamFilter[T any] func(benchkit.CaseResult[T]) bool
 
 // Sink receives benchmark events and drives the interactive Bubble Tea TUI.
 type Sink[T any] struct {
 	out          io.Writer
 	in           io.Reader
 	cancel       context.CancelFunc
-	recentFilter RecentFilter[T]
+	streamFilter StreamFilter[T]
 	program      *tea.Program
 	done         chan struct{}
 	finished     atomic.Bool
@@ -33,12 +34,12 @@ type Sink[T any] struct {
 }
 
 // NewSink creates an interactive TUI event sink.
-func NewSink[T any](out io.Writer, in io.Reader, cancel context.CancelFunc, recentFilter RecentFilter[T]) *Sink[T] {
-	return &Sink[T]{out: out, in: in, cancel: cancel, recentFilter: recentFilter}
+func NewSink[T any](out io.Writer, in io.Reader, cancel context.CancelFunc, streamFilter StreamFilter[T]) *Sink[T] {
+	return &Sink[T]{out: out, in: in, cancel: cancel, streamFilter: streamFilter}
 }
 
 func (s *Sink[T]) SuiteStarted(e benchkit.SuiteEvent) {
-	model := newModel[T](e, s.recentFilter)
+	model := newModel[T](e, s.streamFilter)
 	options := []tea.ProgramOption{tea.WithOutput(s.out), tea.WithFPS(15)}
 	if s.in != nil {
 		options = append(options, tea.WithInput(s.in))

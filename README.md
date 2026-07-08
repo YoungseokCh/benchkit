@@ -120,7 +120,7 @@ func main() {
 
 	err := benchkitcli.CLI[myOutput]{
 		Benchmark:    suite,
-		RecentFilter: benchkitcli.RecentErrors[myOutput],
+		StreamFilter: benchkitcli.StreamErrors[myOutput],
 	}.Run(context.Background(), os.Args[1:])
 	os.Exit(benchkitcli.ExitCode(err))
 }
@@ -138,16 +138,18 @@ The CLI supports:
 
 The default terminal output uses a Bubble Tea TUI with whole-terminal progress,
 suite ETA, execution state counts, stable worker meters, aggregate snapshots, and a
-scrollable recent-results viewport. Redirected output stays plain and
+tabbed stats/stream panel. The stream can toggle between plain and JSON output.
+Redirected output stays plain and
 line-oriented so CI logs remain readable.
 
 TUI keys:
 
-- `k` or up arrow: scroll recent results older.
-- `j` or down arrow: scroll recent results newer.
+- `k` or up arrow: scroll stream output older.
+- `j` or down arrow: scroll stream output newer.
 - `PageUp` / `PageDown`: scroll by one viewport.
-- `g` / `Home`: jump to oldest recent result.
-- `G` / `End`: jump to newest recent result.
+- `g` / `Home`: jump to oldest stream output.
+- `G` / `End`: jump to newest stream output.
+- `a`: reveal or hide completed cases filtered out of the stream.
 - `q` / `Ctrl+C`: exit after the benchmark finishes.
 - `?`: toggle help.
 
@@ -198,8 +200,8 @@ func (a *coverageAggregator) Finalize(summary benchkit.Summary[coverageOutput]) 
 ```
 
 `benchkit.Stats` is optional, but returning it gives the terminal output a
-structured way to render compact key/value sections and tables. Aggregators can
-return any JSON-marshalable value.
+structured way to render labeled stat items and tables. Aggregators can return
+any JSON-marshalable value.
 
 ## Examples
 
