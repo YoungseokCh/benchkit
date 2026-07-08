@@ -74,17 +74,8 @@ func main() {
 				return benchkit.CaseReport[coverageOutput]{}, ctx.Err()
 			case <-timer.C:
 				output := coverageOutput{TotalUnits: totalUnits, CoveredUnits: coveredUnits}
-				coverage := 0.0
-				if output.TotalUnits > 0 {
-					coverage = float64(output.CoveredUnits) / float64(output.TotalUnits)
-				}
 				return benchkit.CaseReport[coverageOutput]{
 					Output: output,
-					Metrics: map[string]float64{
-						"coverage":      coverage,
-						"total_units":   float64(output.TotalUnits),
-						"covered_units": float64(output.CoveredUnits),
-					},
 				}, nil
 			}
 		},

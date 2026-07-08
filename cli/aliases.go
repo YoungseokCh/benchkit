@@ -11,13 +11,12 @@ type Summary[T any] = benchkit.Summary[T]
 type SuiteEvent = benchkit.SuiteEvent
 type WorkerCaseEvent = benchkit.WorkerCaseEvent
 type WorkerCaseResult[T any] = benchkit.WorkerCaseResult[T]
-type Status = benchkit.Status
+type State = benchkit.State
 
 const (
-	StatusPass  = benchkit.StatusPass
-	StatusFail  = benchkit.StatusFail
-	StatusError = benchkit.StatusError
-	StatusSkip  = benchkit.StatusSkip
+	StateDone  = benchkit.StateDone
+	StateError = benchkit.StateError
+	StateSkip  = benchkit.StateSkip
 )
 
-var ErrBenchmarkFailed = benchkit.ErrBenchmarkFailed
+var ErrBenchmarkErrored = benchkit.ErrBenchmarkErrored

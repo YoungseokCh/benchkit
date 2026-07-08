@@ -28,17 +28,16 @@ import (
 - `Case`: one benchmark input. Put lightweight string metadata in `Meta`, or
   close over richer data from your runner.
 - `Runner[T]`: executes one `Case` and returns a typed `CaseReport[T]`.
-- `CaseReport[T]`: carries your typed output, optional status, message, and
-  numeric metrics.
+- `CaseReport[T]`: carries your typed output, optional execution state, and
+  message.
 - `Aggregator[T]`: observes completed results and returns any JSON-marshalable
   final summary.
 - `CLI[T]`: exposes filtering, interactive selection, TUI progress, JSON, and
   JSONL output for your suite.
 
-`StatusPass`, `StatusFail`, `StatusError`, and `StatusSkip` are optional
-framework statuses. They drive default pass/fail counts and CLI exit codes. If
-your benchmark is not a pass/fail test, leave `Status` empty and report through
-`Output`, `Metrics`, and a custom aggregator.
+`StateDone`, `StateError`, and `StateSkip` describe whether a case executed,
+errored, or was skipped. Domain verdicts such as pass/fail belong in your typed
+`Output`, where custom aggregators can summarize them.
 
 ## Minimal Library Usage
 
@@ -54,8 +53,9 @@ import (
 )
 
 type result struct {
-	Input int `json:"input"`
-	Value int `json:"value"`
+	Input  int  `json:"input"`
+	Value  int  `json:"value"`
+	Passed bool `json:"passed"`
 }
 
 func main() {
@@ -73,16 +73,11 @@ func main() {
 
 			value := n * 2
 			report := benchkit.CaseReport[result]{
-				Output: result{Input: n, Value: value},
-				Metrics: map[string]float64{
-					"value": float64(value),
+				Output: result{
+					Input:  n,
+					Value:  value,
+					Passed: value <= 200,
 				},
-			}
-			if value <= 200 {
-				report.Status = benchkit.StatusPass
-			} else {
-				report.Status = benchkit.StatusFail
-				report.Message = "value exceeded limit"
 			}
 			return report, nil
 		},
@@ -96,7 +91,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("%s: %d passed, %d failed\n", summary.Name, summary.Passed, summary.Failed)
+	fmt.Printf("%s: %d done, %d errors\n", summary.Name, summary.Done, summary.Errors)
 }
 ```
 
@@ -125,7 +120,7 @@ func main() {
 
 	err := benchkitcli.CLI[myOutput]{
 		Benchmark:    suite,
-		RecentFilter: benchkitcli.RecentFailed[myOutput],
+		RecentFilter: benchkitcli.RecentErrors[myOutput],
 	}.Run(context.Background(), os.Args[1:])
 	os.Exit(benchkitcli.ExitCode(err))
 }
@@ -144,7 +139,7 @@ The CLI supports:
 - `-jsonl`: stream lifecycle events as JSON lines.
 
 The default terminal output uses a Bubble Tea TUI with whole-terminal progress,
-suite ETA, pass/fail counts, stable worker meters, aggregate snapshots, and a
+suite ETA, execution state counts, stable worker meters, aggregate snapshots, and a
 scrollable recent-results viewport. Redirected output stays plain and
 line-oriented so CI logs remain readable.
 
@@ -160,7 +155,7 @@ TUI keys:
 
 ## Custom Aggregation
 
-Use a custom `Aggregator[T]` when pass/fail counts are not enough. Aggregators
+Use a custom `Aggregator[T]` when execution state counts are not enough. Aggregators
 see every completed result through `Observe`, can expose live TUI/JSONL state
 through `Snapshot`, and return the final `Summary.Aggregated` payload from
 `Finalize`.
@@ -211,7 +206,8 @@ return any JSON-marshalable value.
 ## Examples
 
 Run the bundled testing example. It generates 120 synthetic jobs with mixed
-durations and pass/fail oracle results:
+durations and pass/fail oracle results. Its custom aggregator counts
+`Output.Passed` values in the stat view:
 
 ```sh
 go run ./example/testing -parallel 2
@@ -223,7 +219,7 @@ go run ./example/testing -tag smoke
 go run ./example/testing -match job-04
 ```
 
-Run the coverage example. It leaves case status empty and uses a custom
+Run the coverage example. It uses a custom
 aggregator to compute benchmark-specific coverage:
 
 ```sh

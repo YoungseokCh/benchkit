@@ -13,15 +13,49 @@ import (
 )
 
 type jobOutput struct {
-	WorkUnits int `json:"work_units"`
-	LatencyMS int `json:"latency_ms"`
+	WorkUnits int  `json:"work_units"`
+	LatencyMS int  `json:"latency_ms"`
+	Passed    bool `json:"passed"`
+}
+
+type jobAggregator struct {
+	passed int
+	failed int
+}
+
+func (a *jobAggregator) Observe(result benchkit.CaseResult[jobOutput]) error {
+	if result.State != benchkit.StateDone {
+		return nil
+	}
+	if result.Output.Passed {
+		a.passed++
+	} else {
+		a.failed++
+	}
+	return nil
+}
+
+func (a *jobAggregator) Snapshot() any {
+	return benchkit.Stats{
+		{
+			Title: "verdict",
+			Items: []benchkit.StatItem{
+				{Label: "passed", Value: a.passed},
+				{Label: "failed", Value: a.failed},
+			},
+		},
+	}
+}
+
+func (a *jobAggregator) Finalize(benchkit.Summary[jobOutput]) (any, error) {
+	return a.Snapshot(), nil
 }
 
 func main() {
 	suite := benchkit.Benchmark[jobOutput]{
 		Name:       "testing-demo",
 		Cases:      makeCases(120),
-		Aggregator: &benchkit.SummaryAggregator[jobOutput]{},
+		Aggregator: &jobAggregator{},
 		RunCase: func(ctx context.Context, c benchkit.Case) (benchkit.CaseReport[jobOutput], error) {
 			ms, err := strconv.Atoi(c.Meta["ms"])
 			if err != nil {
@@ -45,28 +79,24 @@ func main() {
 				if err != nil {
 					return benchkit.CaseReport[jobOutput]{}, err
 				}
-				output := jobOutput{WorkUnits: workUnits, LatencyMS: ms}
+				output := jobOutput{
+					WorkUnits: workUnits,
+					LatencyMS: ms,
+					Passed:    ms <= limit,
+				}
 				report := benchkit.CaseReport[jobOutput]{
 					Output: output,
-					Metrics: map[string]float64{
-						"latency_ms": float64(output.LatencyMS),
-						"work_units": float64(output.WorkUnits),
-					},
 				}
-				if output.LatencyMS <= limit {
-					report.Status = benchkit.StatusPass
-					return report, nil
-				}
-				report.Status = benchkit.StatusFail
-				report.Message = "latency exceeded " + strconv.Itoa(limit) + "ms"
 				return report, nil
 			}
 		},
 	}
 
 	err := benchkitcli.CLI[jobOutput]{
-		Benchmark:    suite,
-		RecentFilter: benchkitcli.RecentFailed[jobOutput],
+		Benchmark: suite,
+		RecentFilter: func(result benchkit.CaseResult[jobOutput]) bool {
+			return result.State == benchkit.StateError || !result.Output.Passed
+		},
 	}.Run(context.Background(), os.Args[1:])
 	os.Exit(benchkitcli.ExitCode(err))
 }

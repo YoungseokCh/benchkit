@@ -28,8 +28,8 @@ func (s *plainSink[T]) CaseFinished(e WorkerCaseResult[T]) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := e.Result
-	line := fmt.Sprintf("[%s] %s (%dms)", r.Status, r.Case.Name, r.Duration)
-	if r.Status == "" {
+	line := fmt.Sprintf("[%s] %s (%dms)", r.State, r.Case.Name, r.Duration)
+	if r.State == "" {
 		line = fmt.Sprintf("%s (%dms)", r.Case.Name, r.Duration)
 	}
 	if r.Message != "" {
@@ -49,10 +49,9 @@ func (s *plainSink[T]) SuiteFinished(summary Summary[T]) {
 	defer s.mu.Unlock()
 	fmt.Fprintf(
 		s.out,
-		"Summary: total=%d passed=%d failed=%d errors=%d skipped=%d duration=%dms\n",
+		"Summary: total=%d done=%d errors=%d skipped=%d duration=%dms\n",
 		summary.Total,
-		summary.Passed,
-		summary.Failed,
+		summary.Done,
 		summary.Errors,
 		summary.Skipped,
 		summary.Duration,

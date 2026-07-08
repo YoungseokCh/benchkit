@@ -29,10 +29,9 @@ type CLI[T any] struct {
 // recent-results viewport. It does not affect aggregation or final summaries.
 type RecentFilter[T any] func(CaseResult[T]) bool
 
-// RecentFailed shows failed and errored cases in the TUI recent-results
-// viewport.
-func RecentFailed[T any](result CaseResult[T]) bool {
-	return result.Status == StatusFail || result.Status == StatusError || result.Error != ""
+// RecentErrors shows errored cases in the TUI recent-results viewport.
+func RecentErrors[T any](result CaseResult[T]) bool {
+	return result.State == StateError || result.Error != ""
 }
 
 // Run parses args, optionally prompts for case selection, runs the benchmark,
@@ -128,8 +127,8 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	if userExited && errors.Is(err, context.Canceled) {
 		err = nil
 	}
-	if !userExited && err == nil && !summary.PassedOK() {
-		err = ErrBenchmarkFailed
+	if !userExited && err == nil && !summary.OK() {
+		err = ErrBenchmarkErrored
 	}
 	return err
 }
@@ -139,7 +138,7 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	if errors.Is(err, ErrBenchmarkFailed) {
+	if errors.Is(err, ErrBenchmarkErrored) {
 		return 1
 	}
 	return 2

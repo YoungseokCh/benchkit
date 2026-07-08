@@ -115,7 +115,7 @@ func formatAggregateTable(value any, width int) string {
 	}
 
 	var rows [][2]string
-	if values, ok := decoded["by_status"].(map[string]any); ok {
+	if values, ok := decoded["by_state"].(map[string]any); ok {
 		for _, key := range sortedKeys(values) {
 			if value, ok := values[key].(float64); ok {
 				rows = append(rows, [2]string{key, formatFloatCompact(value)})
@@ -125,7 +125,7 @@ func formatAggregateTable(value any, width int) string {
 
 	for _, key := range sortedKeys(decoded) {
 		values, ok := decoded[key].(map[string]any)
-		if !ok || key == "by_status" {
+		if !ok || key == "by_state" {
 			continue
 		}
 		for _, nestedKey := range sortedKeys(values) {
@@ -338,7 +338,7 @@ func padLeftCLI(value string, width int) string {
 
 func formatNestedAggregate(name string, values map[string]any) []string {
 	var parts []string
-	if name == "by_status" {
+	if name == "by_state" {
 		for _, key := range sortedKeys(values) {
 			if value, ok := values[key].(float64); ok {
 				parts = append(parts, key+"="+formatFloatCompact(value))

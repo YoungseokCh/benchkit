@@ -84,7 +84,7 @@ func (b Benchmark[T]) Run(ctx context.Context, opts RunOptions[T]) (Summary[T], 
 		}
 
 		summary.Results = append(summary.Results, result)
-		summary.count(result.Status)
+		summary.count(result.State)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -115,18 +115,19 @@ func (b Benchmark[T]) runOne(ctx context.Context, workerID int, c Case, sink Eve
 	errText := ""
 
 	if runErr != nil {
-		report.Status = StatusError
+		report.State = StateError
 		report.Message = runErr.Error()
 		errText = runErr.Error()
+	} else if report.State == "" {
+		report.State = StateDone
 	}
 
 	finished := time.Now()
 	result := CaseResult[T]{
 		Case:       c,
 		Output:     report.Output,
-		Status:     report.Status,
+		State:      report.State,
 		Message:    report.Message,
-		Metrics:    report.Metrics,
 		Error:      errText,
 		StartedAt:  started,
 		FinishedAt: finished,
@@ -151,18 +152,18 @@ func (b Benchmark[T]) validate() error {
 	return nil
 }
 
-func (s *Summary[T]) count(status Status) {
-	switch status {
+func (s *Summary[T]) count(state State) {
+	switch state {
 	case "":
-		return
-	case StatusPass:
-		s.Passed++
-	case StatusSkip:
+		s.Done++
+	case StateDone:
+		s.Done++
+	case StateSkip:
 		s.Skipped++
-	case StatusError:
+	case StateError:
 		s.Errors++
 	default:
-		s.Failed++
+		s.Errors++
 	}
 }
 

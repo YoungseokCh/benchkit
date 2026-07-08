@@ -6,21 +6,19 @@ import (
 	"time"
 )
 
-// ErrBenchmarkFailed is returned by CLI.Run when the suite completed but at
-// least one case failed or errored.
-var ErrBenchmarkFailed = errors.New("benchmark failed")
+// ErrBenchmarkErrored is returned by CLI.Run when the suite completed but at
+// least one case errored.
+var ErrBenchmarkErrored = errors.New("benchmark errored")
 
-// Status is an optional framework-level classification for one benchmark case.
-// The preset values drive default pass/fail accounting and CLI exit codes when
-// a runner chooses to set a status. Benchmarks that only aggregate domain data
-// can leave Status empty.
-type Status string
+// State is the framework-level execution state for one benchmark case. Domain
+// verdicts such as pass/fail belong in the user-defined Output value. Successful
+// cases default to StateDone.
+type State string
 
 const (
-	StatusPass  Status = "PASS"
-	StatusFail  Status = "FAIL"
-	StatusError Status = "ERROR"
-	StatusSkip  Status = "SKIP"
+	StateDone  State = "DONE"
+	StateError State = "ERROR"
+	StateSkip  State = "SKIP"
 )
 
 // Case is one benchmark input. Users can keep the benchmark-specific payload in
@@ -34,10 +32,9 @@ type Case struct {
 
 // CaseReport is the user-produced result payload for one case.
 type CaseReport[T any] struct {
-	Output  T                  `json:"output,omitempty"`
-	Status  Status             `json:"status"`
-	Message string             `json:"message,omitempty"`
-	Metrics map[string]float64 `json:"metrics,omitempty"`
+	Output  T      `json:"output,omitempty"`
+	State   State  `json:"state,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // Runner executes one benchmark case and returns the user-defined result
@@ -48,7 +45,7 @@ type Runner[T any] func(context.Context, Case) (CaseReport[T], error)
 // Aggregator receives each completed case and returns an arbitrary
 // machine-readable summary at the end of the run. Use this for benchmark-domain
 // aggregates such as coverage, precision/recall, latency percentiles, cost, or
-// any other result model that does not fit pass/fail/error/skip accounting.
+// any other result model carried by Output.
 type Aggregator[T any] interface {
 	Observe(CaseResult[T]) error
 	Snapshot() any
@@ -127,23 +124,21 @@ type RunOptions[T any] struct {
 
 // CaseResult is the complete result for one case.
 type CaseResult[T any] struct {
-	Case       Case               `json:"case"`
-	Output     T                  `json:"output,omitempty"`
-	Status     Status             `json:"status,omitempty"`
-	Message    string             `json:"message,omitempty"`
-	Metrics    map[string]float64 `json:"metrics,omitempty"`
-	Error      string             `json:"error,omitempty"`
-	StartedAt  time.Time          `json:"started_at"`
-	FinishedAt time.Time          `json:"finished_at"`
-	Duration   int64              `json:"duration_ms"`
+	Case       Case      `json:"case"`
+	Output     T         `json:"output,omitempty"`
+	State      State     `json:"state"`
+	Message    string    `json:"message,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
+	Duration   int64     `json:"duration_ms"`
 }
 
 // Summary is the framework-level run result.
 type Summary[T any] struct {
 	Name       string          `json:"name"`
 	Total      int             `json:"total"`
-	Passed     int             `json:"passed"`
-	Failed     int             `json:"failed"`
+	Done       int             `json:"done"`
 	Errors     int             `json:"errors"`
 	Skipped    int             `json:"skipped"`
 	StartedAt  time.Time       `json:"started_at"`
@@ -153,7 +148,7 @@ type Summary[T any] struct {
 	Aggregated any             `json:"aggregated,omitempty"`
 }
 
-// Passed reports whether there were no failed or errored cases.
-func (s Summary[T]) PassedOK() bool {
-	return s.Failed == 0 && s.Errors == 0
+// OK reports whether there were no errored cases.
+func (s Summary[T]) OK() bool {
+	return s.Errors == 0
 }

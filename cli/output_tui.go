@@ -168,8 +168,7 @@ type bubbleModel[T any] struct {
 	total        int
 	parallel     int
 	completed    int
-	passed       int
-	failed       int
+	done         int
 	errors       int
 	skipped      int
 	aggregate    string
@@ -265,8 +264,7 @@ func (m bubbleModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case bubbleSuiteFinishedMsg[T]:
 		m.completed = msg.summary.Total
-		m.passed = msg.summary.Passed
-		m.failed = msg.summary.Failed
+		m.done = msg.summary.Done
 		m.errors = msg.summary.Errors
 		m.skipped = msg.summary.Skipped
 		m.aggregate = formatAggregateTable(msg.summary.Aggregated, m.aggregateWidth())
@@ -309,16 +307,17 @@ func (m *bubbleModel[T]) applyCaseFinished(event WorkerCaseResult[T]) bool {
 	}
 	m.totalCaseMS += result.Duration
 	m.completed++
-	switch result.Status {
-	case StatusPass:
-		m.passed++
-	case StatusSkip:
+	switch result.State {
+	case StateDone:
+		m.done++
+	case StateSkip:
 		m.skipped++
-	case StatusError:
+	case StateError:
 		m.errors++
 	case "":
+		m.done++
 	default:
-		m.failed++
+		m.errors++
 	}
 	if m.recentFilter == nil || m.recentFilter(result) {
 		m.recent = append(m.recent, m.resultLine(result))
@@ -745,28 +744,26 @@ func (m *bubbleModel[T]) refreshRecent() {
 }
 
 func (m bubbleModel[T]) resultLine(r CaseResult[T]) string {
-	if r.Status == "" {
+	if r.State == "" {
 		line := fmt.Sprintf("%s (%dms)", r.Case.Name, r.Duration)
 		if r.Message != "" {
 			line += ": " + r.Message
 		}
 		return line
 	}
-	status := string(r.Status)
-	switch r.Status {
-	case StatusPass:
-		status = bubblePassStyle.Render(status)
-	case StatusError:
-		status = bubbleErrorStyle.Render(status)
-	case StatusFail:
-		status = bubbleFailStyle.Render(status)
+	state := string(r.State)
+	switch r.State {
+	case StateDone:
+		state = bubblePassStyle.Render(state)
+	case StateError:
+		state = bubbleErrorStyle.Render(state)
 	default:
-		if r.Status != StatusSkip {
-			status = bubbleFailStyle.Render(status)
+		if r.State != StateSkip {
+			state = bubbleFailStyle.Render(state)
 		}
 	}
 
-	line := fmt.Sprintf("[%s] %s (%dms)", status, r.Case.Name, r.Duration)
+	line := fmt.Sprintf("[%s] %s (%dms)", state, r.Case.Name, r.Duration)
 	if r.Message != "" {
 		line += ": " + r.Message
 	}
