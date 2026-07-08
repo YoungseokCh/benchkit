@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	tuipkg "github.com/YoungseokCh/benchkit/cli/tui"
 )
@@ -59,6 +60,8 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	var jsonLines bool
 	var interactive bool
 	var tui bool
+	var resultDir string
+	var update bool
 
 	flags := flag.NewFlagSet(c.Benchmark.Name, flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -69,9 +72,20 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	flags.BoolVar(&jsonLines, "jsonl", false, "stream machine-readable JSON lines")
 	flags.BoolVar(&interactive, "interactive", false, "prompt for case selection before running")
 	flags.BoolVar(&tui, "tui", true, "use the interactive terminal UI when stdin and stdout are terminals")
+	flags.StringVar(&resultDir, "result-dir", defaultResultDir(time.Now()), "directory for persisted result data")
+	flags.BoolVar(&update, "update", false, "load summary.json from result-dir and update it with selected cases")
 
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	resultDirSet := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "result-dir" {
+			resultDirSet = true
+		}
+	})
+	if update && !resultDirSet {
+		return errors.New("-update requires -result-dir")
 	}
 
 	names := splitCSV(caseCSV)
@@ -88,7 +102,6 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	}
 
 	bench := c.Benchmark
-	bench.Cases = filterCases(c.Benchmark.Cases, names, tags, match)
 
 	var sink EventSink[T]
 	runCtx := ctx
@@ -111,13 +124,32 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 		}
 	}
 
-	summary, err := bench.Run(runCtx, RunOptions[T]{
+	runOpts := RunOptions[T]{
 		Parallel: parallel,
+		Names:    names,
+		Tags:     tags,
+		Match:    match,
 		Sink:     sink,
-	})
+	}
+	var summary Summary[T]
+	var err error
+	if update {
+		previous, loadErr := loadSummary[T](resultDir)
+		if loadErr != nil {
+			return loadErr
+		}
+		summary, err = bench.RunIncremental(runCtx, runOpts, previous)
+	} else {
+		summary, err = bench.Run(runCtx, runOpts)
+	}
 	userExited := bubble != nil && bubble.UserExited()
 	if userExited && errors.Is(err, context.Canceled) {
 		err = nil
+	}
+	if err == nil && !userExited {
+		if saveErr := saveSummary(resultDir, summary); saveErr != nil {
+			err = saveErr
+		}
 	}
 	if !userExited && err == nil && !summary.OK() {
 		err = ErrBenchmarkErrored

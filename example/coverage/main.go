@@ -52,7 +52,7 @@ func newCoverageAggregator(files []coverageFile) *coverageAggregator {
 	return aggregator
 }
 
-func (a *coverageAggregator) Observe(result benchkit.CaseResult[coverageOutput]) error {
+func (a *coverageAggregator) add(result benchkit.CaseResult[coverageOutput]) error {
 	if result.State != benchkit.StateDone {
 		return nil
 	}
@@ -77,11 +77,7 @@ func (a *coverageAggregator) Observe(result benchkit.CaseResult[coverageOutput])
 	return nil
 }
 
-func (a *coverageAggregator) Finalize(summary benchkit.Summary[coverageOutput]) (any, error) {
-	return a.Snapshot(), nil
-}
-
-func (a *coverageAggregator) Snapshot() any {
+func (a *coverageAggregator) stats() benchkit.Stats {
 	totalUnits := 0
 	coveredUnits := 0
 	rows := make([][]any, 0, len(a.order))
@@ -124,6 +120,18 @@ func (f fileCoverageAggregate) coverage() float64 {
 	return float64(f.coveredUnits) / float64(f.totalUnits)
 }
 
+func coverageAggregate(files []coverageFile) benchkit.AggregateFunc[coverageOutput] {
+	return func(summary benchkit.Summary[coverageOutput]) (any, error) {
+		aggregator := newCoverageAggregator(files)
+		for _, result := range summary.Results {
+			if err := aggregator.add(result); err != nil {
+				return nil, err
+			}
+		}
+		return aggregator.stats(), nil
+	}
+}
+
 func main() {
 	files := []coverageFile{
 		{Path: "api/server.go", TotalUnits: 96},
@@ -134,9 +142,9 @@ func main() {
 	cases, outputs := makeCases(120, files)
 
 	suite := benchkit.Benchmark[coverageOutput]{
-		Name:       "coverage-demo",
-		Cases:      cases,
-		Aggregator: newCoverageAggregator(files),
+		Name:      "coverage-demo",
+		Cases:     cases,
+		Aggregate: coverageAggregate(files),
 		RunCase: func(ctx context.Context, c benchkit.Case) (benchkit.CaseReport[coverageOutput], error) {
 			ms, err := strconv.Atoi(c.Meta["ms"])
 			if err != nil {

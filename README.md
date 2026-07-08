@@ -25,11 +25,27 @@ import (
 
 ## Changelog
 
-### Unreleased
+### 0.1.2
 
+Compared with `v0.1.1`:
+
+- Add incremental result updates with `Benchmark.RunIncremental`, which reruns
+  selected cases, merges them into a previous whole-suite summary, and
+  recomputes the aggregate from the merged results.
+- Replace stateful aggregator configuration with `Benchmark.Aggregate`, a
+  stateless function that computes aggregate output from the current `Summary`.
+- Add CLI result persistence: runs write `summary.json` under `-result-dir`
+  defaulting to `result/<current-time>`, and `-update -result-dir DIR` updates
+  that saved whole-suite result with selected rerun cases.
+- Reject duplicate case names during benchmark validation because incremental
+  updates use case names as the result merge key.
+- Add `example/incremental` with a runnable end-to-end update demo.
 - Use one shared scrollable TUI panel for both stats and stream tabs. Switching
   tabs swaps the panel content and resets scroll position instead of preserving
   separate per-tab scroll state.
+- Refine TUI panel scrolling so stats refreshes keep their scroll position,
+  code-only key events are handled consistently, and fitted content still shows
+  the scrollbar track without a thumb.
 
 ### 0.1.1
 
@@ -37,12 +53,13 @@ Compared with `v0.1.0`:
 
 - Replaced the pass/fail `Status` model with framework execution `State`
   values: `StateDone`, `StateError`, and `StateSkip`. Domain verdicts such as
-  pass/fail now belong in the typed `Output` payload and custom aggregators.
+  pass/fail now belong in the typed `Output` payload and custom aggregate
+  functions.
 - Replaced `ErrBenchmarkFailed`, `Summary.PassedOK`, `Summary.Passed`, and
   `Summary.Failed` with error-focused `ErrBenchmarkErrored`, `Summary.OK`,
   `Summary.Done`, `Summary.Errors`, and `Summary.Skipped`.
 - Removed `CaseReport.Metrics` and `CaseResult.Metrics`; report benchmark data
-  through typed `Output` and aggregate it with `Aggregator[T]`.
+  through typed `Output` and aggregate it with custom aggregation.
 - Replaced TUI `RecentFilter` / `RecentFailed` with `StreamFilter` /
   `StreamErrors`. Errored cases are always visible, while non-error completed
   cases are filtered by `StreamFilter`.
@@ -55,7 +72,7 @@ Compared with `v0.1.0`:
 - Removed the CLI `-list` and final-summary `-json` flags; use case filters to
   select runs and `-jsonl` for machine-readable lifecycle output.
 - Updated the bundled examples to put domain pass/fail data in `Output` and to
-  use custom aggregators for benchmark-specific summaries.
+  use custom aggregate functions for benchmark-specific summaries.
 
 ## Core Concepts
 
@@ -64,14 +81,14 @@ Compared with `v0.1.0`:
 - `Runner[T]`: executes one `Case` and returns a typed `CaseReport[T]`.
 - `CaseReport[T]`: carries your typed output, optional execution state, and
   message.
-- `Aggregator[T]`: observes completed results and returns any JSON-marshalable
-  final summary.
+- `AggregateFunc[T]`: computes any JSON-marshalable aggregate from the current
+  `Summary[T]`.
 - `CLI[T]`: exposes filtering, interactive selection, TUI progress, JSON, and
   JSONL output for your suite.
 
 `StateDone`, `StateError`, and `StateSkip` describe whether a case executed,
 errored, or was skipped. Domain verdicts such as pass/fail belong in your typed
-`Output`, where custom aggregators can summarize them.
+`Output`, where custom aggregate functions can summarize them.
 
 ## Minimal Library Usage
 
@@ -115,7 +132,7 @@ func main() {
 			}
 			return report, nil
 		},
-		Aggregator: &benchkit.SummaryAggregator[result]{},
+		Aggregate: benchkit.StateAggregate[result],
 	}
 
 	summary, err := suite.Run(context.Background(), benchkit.RunOptions[result]{
@@ -149,7 +166,7 @@ func main() {
 		Name:       "my-benchmark",
 		Cases:      makeCases(),
 		RunCase:    runCase,
-		Aggregator: &benchkit.SummaryAggregator[myOutput]{},
+		Aggregate: benchkit.StateAggregate[myOutput],
 	}
 
 	err := benchkitcli.CLI[myOutput]{
@@ -169,6 +186,12 @@ The CLI supports:
 - `-interactive`: prompt for case selection.
 - `-tui=false`: disable the terminal UI and print plain progress lines.
 - `-jsonl`: stream lifecycle events as JSON lines.
+- `-result-dir DIR`: write `summary.json` under `DIR`; defaults to
+  `result/<current-time>`.
+- `-update`: load `summary.json` from `-result-dir`, rerun the selected cases,
+  and rewrite the whole merged result.
+
+See `example/incremental` for a runnable incremental update demo.
 
 The default terminal output uses a Bubble Tea TUI with whole-terminal progress,
 suite ETA, execution state counts, stable worker meters, aggregate snapshots, and a
@@ -189,10 +212,10 @@ TUI keys:
 
 ## Custom Aggregation
 
-Use a custom `Aggregator[T]` when execution state counts are not enough. Aggregators
-see every completed result through `Observe`, can expose live TUI/JSONL state
-through `Snapshot`, and return the final `Summary.Aggregated` payload from
-`Finalize`.
+Use a custom `AggregateFunc[T]` when execution state counts are not enough.
+`Aggregate` receives the current `Summary[T]`, including the results collected
+so far, and returns the value stored in `Summary.Aggregated` and shown in
+terminal/JSONL aggregate updates.
 
 ```go
 type coverageFile struct {
@@ -233,9 +256,9 @@ func newCoverageAggregator(files []coverageFile) *coverageAggregator {
 	return aggregator
 }
 
-func (a *coverageAggregator) Observe(result benchkit.CaseResult[coverageOutput]) error {
+func (a *coverageAggregator) add(result benchkit.CaseResult[coverageOutput]) {
 	if result.State != benchkit.StateDone {
-		return nil
+		return
 	}
 	for _, file := range result.Output.Files {
 		aggregate := a.files[file.Path]
@@ -246,10 +269,9 @@ func (a *coverageAggregator) Observe(result benchkit.CaseResult[coverageOutput])
 			}
 		}
 	}
-	return nil
 }
 
-func (a *coverageAggregator) Snapshot() any {
+func (a *coverageAggregator) stats() benchkit.Stats {
 	totalUnits := 0
 	coveredUnits := 0
 	rows := make([][]any, 0, len(a.order))
@@ -285,19 +307,25 @@ func (a *coverageAggregator) Snapshot() any {
 	}
 }
 
-func (a *coverageAggregator) Finalize(summary benchkit.Summary[coverageOutput]) (any, error) {
-	return a.Snapshot(), nil
+func coverageAggregate(files []coverageFile) benchkit.AggregateFunc[coverageOutput] {
+	return func(summary benchkit.Summary[coverageOutput]) (any, error) {
+		aggregator := newCoverageAggregator(files)
+		for _, result := range summary.Results {
+			aggregator.add(result)
+		}
+		return aggregator.stats(), nil
+	}
 }
 ```
 
 `benchkit.Stats` is optional, but returning it gives the terminal output a
-structured way to render labeled stat items and tables. Aggregators can return
-any JSON-marshalable value.
+structured way to render labeled stat items and tables. Aggregate functions can
+return any JSON-marshalable value.
 
 ## Examples
 
 Run the bundled testing example. It generates 120 synthetic jobs with mixed
-durations and pass/fail oracle results. Its custom aggregator counts
+durations and pass/fail oracle results. Its custom aggregate function counts
 `Output.Passed` values in the stat view:
 
 ```sh
@@ -309,8 +337,8 @@ go run ./example/testing -tag smoke
 go run ./example/testing -match job-04
 ```
 
-Run the coverage example. It uses a custom
-aggregator to compute benchmark-specific coverage:
+Run the coverage example. It uses a custom aggregate function to compute
+benchmark-specific coverage:
 
 ```sh
 go run ./example/coverage -parallel 16

@@ -18,44 +18,35 @@ type jobOutput struct {
 	Passed    bool `json:"passed"`
 }
 
-type jobAggregator struct {
-	passed int
-	failed int
-}
-
-func (a *jobAggregator) Observe(result benchkit.CaseResult[jobOutput]) error {
-	if result.State != benchkit.StateDone {
-		return nil
+func jobAggregate(summary benchkit.Summary[jobOutput]) (any, error) {
+	passed := 0
+	failed := 0
+	for _, result := range summary.Results {
+		if result.State != benchkit.StateDone {
+			continue
+		}
+		if result.Output.Passed {
+			passed++
+		} else {
+			failed++
+		}
 	}
-	if result.Output.Passed {
-		a.passed++
-	} else {
-		a.failed++
-	}
-	return nil
-}
-
-func (a *jobAggregator) Snapshot() any {
 	return benchkit.Stats{
 		{
 			Title: "verdict",
 			Items: []benchkit.StatItem{
-				{Label: "passed", Value: a.passed},
-				{Label: "failed", Value: a.failed},
+				{Label: "passed", Value: passed},
+				{Label: "failed", Value: failed},
 			},
 		},
-	}
-}
-
-func (a *jobAggregator) Finalize(benchkit.Summary[jobOutput]) (any, error) {
-	return a.Snapshot(), nil
+	}, nil
 }
 
 func main() {
 	suite := benchkit.Benchmark[jobOutput]{
-		Name:       "testing-demo",
-		Cases:      makeCases(120),
-		Aggregator: &jobAggregator{},
+		Name:      "testing-demo",
+		Cases:     makeCases(120),
+		Aggregate: jobAggregate,
 		RunCase: func(ctx context.Context, c benchkit.Case) (benchkit.CaseReport[jobOutput], error) {
 			ms, err := strconv.Atoi(c.Meta["ms"])
 			if err != nil {

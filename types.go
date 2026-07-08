@@ -42,18 +42,14 @@ type CaseReport[T any] struct {
 // reporting around it.
 type Runner[T any] func(context.Context, Case) (CaseReport[T], error)
 
-// Aggregator receives each completed case and returns an arbitrary
-// machine-readable summary at the end of the run. Use this for benchmark-domain
-// aggregates such as coverage, precision/recall, latency percentiles, cost, or
-// any other result model carried by Output.
-type Aggregator[T any] interface {
-	Observe(CaseResult[T]) error
-	Snapshot() any
-	Finalize(Summary[T]) (any, error)
-}
+// AggregateFunc returns an arbitrary machine-readable summary for the results
+// collected so far. Use this for benchmark-domain aggregates such as coverage,
+// precision/recall, latency percentiles, cost, or any other result model
+// carried by Output.
+type AggregateFunc[T any] func(Summary[T]) (any, error)
 
-// Stats is an optional first-class aggregate display model. Aggregators can
-// still return any JSON-marshalable value, but returning Stats lets terminal
+// Stats is an optional first-class aggregate display model. Aggregate functions
+// can still return any JSON-marshalable value, but returning Stats lets terminal
 // output distinguish stat items from true tables.
 type Stats []Stat
 
@@ -107,10 +103,10 @@ type WorkerCaseResult[T any] struct {
 
 // Benchmark is the user-defined benchmark suite.
 type Benchmark[T any] struct {
-	Name       string
-	Cases      []Case
-	RunCase    Runner[T]
-	Aggregator Aggregator[T]
+	Name      string
+	Cases     []Case
+	RunCase   Runner[T]
+	Aggregate AggregateFunc[T]
 }
 
 // RunOptions controls scheduling and result collection.

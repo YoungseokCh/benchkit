@@ -1,46 +1,26 @@
 package benchkit
 
-// SummaryAggregator is the default lightweight aggregator. It keeps per-state
-// counts across all case results.
-type SummaryAggregator[T any] struct {
-	ByState map[State]int `json:"by_state"`
-}
-
-// Observe records one result.
-func (a *SummaryAggregator[T]) Observe(result CaseResult[T]) error {
-	if a.ByState == nil {
-		a.ByState = make(map[State]int)
+// StateAggregate returns a lightweight aggregate with per-state counts.
+func StateAggregate[T any](summary Summary[T]) (any, error) {
+	byState := make(map[State]int)
+	for _, result := range summary.Results {
+		state := result.State
+		if state == "" {
+			state = StateDone
+		}
+		byState[state]++
 	}
-	state := result.State
-	if state == "" {
-		state = StateDone
-	}
-	a.ByState[state]++
 
-	return nil
-}
-
-// Finalize returns the aggregate itself.
-func (a *SummaryAggregator[T]) Snapshot() any {
-	if a.ByState == nil {
-		a.ByState = make(map[State]int)
-	}
 	var stats Stats
-
-	state := Stat{Title: "state"}
-	for _, s := range []State{StateDone, StateError, StateSkip} {
-		if count, ok := a.ByState[s]; ok {
-			state.Items = append(state.Items, StatItem{Label: string(s), Value: count})
+	stateStats := Stat{Title: "state"}
+	for _, state := range []State{StateDone, StateError, StateSkip} {
+		if count, ok := byState[state]; ok {
+			stateStats.Items = append(stateStats.Items, StatItem{Label: string(state), Value: count})
 		}
 	}
-	if len(state.Items) > 0 {
-		stats = append(stats, state)
+	if len(stateStats.Items) > 0 {
+		stats = append(stats, stateStats)
 	}
 
-	return stats
-}
-
-// Finalize returns the aggregate itself.
-func (a *SummaryAggregator[T]) Finalize(Summary[T]) (any, error) {
-	return a.Snapshot(), nil
+	return stats, nil
 }

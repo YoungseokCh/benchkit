@@ -12,6 +12,10 @@ import (
 
 // Run executes the benchmark suite with bounded parallelism.
 func (b Benchmark[T]) Run(ctx context.Context, opts RunOptions[T]) (Summary[T], error) {
+	return b.run(ctx, opts, b.Aggregate, true)
+}
+
+func (b Benchmark[T]) run(ctx context.Context, opts RunOptions[T], aggregate AggregateFunc[T], finishSink bool) (Summary[T], error) {
 	if err := b.validate(); err != nil {
 		return Summary[T]{Name: b.Name}, err
 	}
@@ -75,16 +79,17 @@ func (b Benchmark[T]) Run(ctx context.Context, opts RunOptions[T]) (Summary[T], 
 
 	var runErrs []error
 	for result := range results {
-		if b.Aggregator != nil {
-			if err := b.Aggregator.Observe(result); err != nil {
-				runErrs = append(runErrs, fmt.Errorf("aggregate %s: %w", result.Case.Name, err))
-			} else {
-				sink.AggregateUpdated(b.Aggregator.Snapshot())
-			}
-		}
-
 		summary.Results = append(summary.Results, result)
 		summary.count(result.State)
+
+		if aggregate != nil {
+			snapshot, err := aggregate(summary)
+			if err != nil {
+				runErrs = append(runErrs, fmt.Errorf("aggregate %s: %w", result.Case.Name, err))
+			} else {
+				sink.AggregateUpdated(snapshot)
+			}
+		}
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -94,8 +99,8 @@ func (b Benchmark[T]) Run(ctx context.Context, opts RunOptions[T]) (Summary[T], 
 	summary.FinishedAt = time.Now()
 	summary.Duration = summary.FinishedAt.Sub(summary.StartedAt).Milliseconds()
 
-	if b.Aggregator != nil {
-		aggregated, err := b.Aggregator.Finalize(summary)
+	if aggregate != nil {
+		aggregated, err := aggregate(summary)
 		if err != nil {
 			runErrs = append(runErrs, fmt.Errorf("finalize aggregation: %w", err))
 		} else {
@@ -103,7 +108,9 @@ func (b Benchmark[T]) Run(ctx context.Context, opts RunOptions[T]) (Summary[T], 
 		}
 	}
 
-	sink.SuiteFinished(summary)
+	if finishSink {
+		sink.SuiteFinished(summary)
+	}
 	return summary, errors.Join(runErrs...)
 }
 
@@ -148,6 +155,13 @@ func (b Benchmark[T]) validate() error {
 		if c.Name == "" {
 			return fmt.Errorf("case %d has empty name", i)
 		}
+	}
+	seen := make(map[string]struct{}, len(b.Cases))
+	for _, c := range b.Cases {
+		if _, ok := seen[c.Name]; ok {
+			return fmt.Errorf("duplicate case name %q", c.Name)
+		}
+		seen[c.Name] = struct{}{}
 	}
 	return nil
 }
