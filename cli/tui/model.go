@@ -181,19 +181,15 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshPanel()
 	}
 
-	m.viewport, cmd = m.viewport.Update(msg)
+	handledViewportInput := false
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "down", "j", "pgdown", "space", "f", "d", "ctrl+d", "end":
-			if m.activeTab == viewTabStream && m.viewport.AtBottom() {
-				m.followRecent = true
-			}
-		}
+		handledViewportInput = m.handleViewportKey(msg)
 	case tea.MouseWheelMsg:
-		if m.activeTab == viewTabStream && msg.Mouse().Button == tea.MouseWheelDown && m.viewport.AtBottom() {
-			m.followRecent = true
-		}
+		handledViewportInput = m.handleViewportMouse(msg)
+	}
+	if !handledViewportInput {
+		m.viewport, cmd = m.viewport.Update(msg)
 	}
 	return m, cmd
 }
@@ -389,6 +385,66 @@ func (m *model[T]) resetViewportForTab() {
 		m.followRecent = true
 		m.viewport.GotoBottom()
 	}
+}
+
+func (m *model[T]) handleViewportKey(msg tea.KeyPressMsg) bool {
+	switch msg.String() {
+	case "down", "j":
+		m.viewport.ScrollDown(1)
+	case "up", "k":
+		m.viewport.ScrollUp(1)
+	case "pgdown", "pagedown", "space", "f":
+		m.viewport.PageDown()
+	case "pgup", "pageup", "b":
+		m.viewport.PageUp()
+	case "d", "ctrl+d":
+		m.viewport.HalfPageDown()
+	case "u", "ctrl+u":
+		m.viewport.HalfPageUp()
+	case "home", "g":
+		m.viewport.GotoTop()
+	case "end", "G":
+		m.viewport.GotoBottom()
+	default:
+		switch msg.Key().Code {
+		case tea.KeyDown:
+			m.viewport.ScrollDown(1)
+		case tea.KeyUp:
+			m.viewport.ScrollUp(1)
+		case tea.KeyPgDown:
+			m.viewport.PageDown()
+		case tea.KeyPgUp:
+			m.viewport.PageUp()
+		case tea.KeyHome:
+			m.viewport.GotoTop()
+		case tea.KeyEnd:
+			m.viewport.GotoBottom()
+		default:
+			return false
+		}
+	}
+	m.updateFollowRecentAfterScroll()
+	return true
+}
+
+func (m *model[T]) handleViewportMouse(msg tea.MouseWheelMsg) bool {
+	switch msg.Mouse().Button {
+	case tea.MouseWheelUp:
+		m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
+	case tea.MouseWheelDown:
+		m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
+	default:
+		return false
+	}
+	m.updateFollowRecentAfterScroll()
+	return true
+}
+
+func (m *model[T]) updateFollowRecentAfterScroll() {
+	if m.activeTab != viewTabStream {
+		return
+	}
+	m.followRecent = m.viewport.AtBottom()
 }
 
 func (m model[T]) streamLines() []string {
