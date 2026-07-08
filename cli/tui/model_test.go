@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -114,6 +115,51 @@ func TestModelStreamShowsOnlyRunResults(t *testing.T) {
 	}
 }
 
+func TestModelStatsTabUsesSharedScrollableViewport(t *testing.T) {
+	m := newModel[struct{}](benchkit.SuiteEvent{
+		Name:     "scrollable-stats",
+		Total:    1,
+		Parallel: 1,
+	}, nil)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = updated.(model[struct{}])
+
+	rows := make([][]any, 0, 40)
+	for i := 0; i < 40; i++ {
+		rows = append(rows, []any{"file-" + leftPadForTest(i, 2), 100, i, float64(i) / 100})
+	}
+	updated, _ = m.Update(aggregateUpdatedMsg{snapshot: benchkit.Stats{
+		{
+			Title: "coverage",
+			Table: &benchkit.StatTable{
+				Columns: []string{"file", "total", "covered", "coverage"},
+				Rows:    rows,
+			},
+		},
+	}})
+	m = updated.(model[struct{}])
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	m = updated.(model[struct{}])
+
+	if m.viewport.YOffset() != 0 {
+		t.Fatalf("stats viewport starts at offset %d, want 0", m.viewport.YOffset())
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	m = updated.(model[struct{}])
+	if m.viewport.YOffset() == 0 {
+		t.Fatal("stats viewport did not scroll on page down")
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	m = updated.(model[struct{}])
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	m = updated.(model[struct{}])
+	if m.viewport.YOffset() != 0 {
+		t.Fatalf("stats viewport preserved tab scroll offset %d, want reset to 0", m.viewport.YOffset())
+	}
+}
+
 func TestModelWithoutStreamFilterShowsCompletedCases(t *testing.T) {
 	model := newModel[struct{}](benchkit.SuiteEvent{
 		Name:     "unfiltered",
@@ -132,4 +178,12 @@ func TestModelWithoutStreamFilterShowsCompletedCases(t *testing.T) {
 	if !strings.Contains(stream, "done-case") {
 		t.Fatalf("stream omits completed case without filter:\n%s", stream)
 	}
+}
+
+func leftPadForTest(value int, width int) string {
+	text := strconv.Itoa(value)
+	for len(text) < width {
+		text = "0" + text
+	}
+	return text
 }

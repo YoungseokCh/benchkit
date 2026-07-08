@@ -67,7 +67,7 @@ func newModel[T any](e benchkit.SuiteEvent, streamFilter StreamFilter[T]) model[
 	}
 	model.viewport.MouseWheelDelta = 1
 	model.configureViewport()
-	model.refreshStream()
+	model.refreshPanel()
 	return model
 }
 
@@ -90,38 +90,52 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.nextTab()
 			m.configureViewport()
+			m.refreshPanel()
+			m.resetViewportForTab()
 		case "shift+tab":
 			m.previousTab()
 			m.configureViewport()
+			m.refreshPanel()
+			m.resetViewportForTab()
 		case "1", "s":
 			m.activeTab = viewTabStats
 			m.configureViewport()
+			m.refreshPanel()
+			m.resetViewportForTab()
 		case "2", "o":
 			m.activeTab = viewTabStream
 			m.configureViewport()
+			m.refreshPanel()
+			m.resetViewportForTab()
 		case "m":
 			m.toggleStreamMode()
-			m.refreshStream()
+			m.refreshPanel()
 		case "p":
 			m.streamMode = streamModePlain
-			m.refreshStream()
+			m.refreshPanel()
 		case "r":
 			m.streamMode = streamModeJSON
-			m.refreshStream()
+			m.refreshPanel()
 		case "a":
 			m.showHidden = !m.showHidden
-			m.refreshStream()
+			m.refreshPanel()
 		case "up", "k", "pgup", "b", "u", "ctrl+u", "home":
-			m.followRecent = false
+			if m.activeTab == viewTabStream {
+				m.followRecent = false
+			}
 		case "end":
-			m.followRecent = true
+			if m.activeTab == viewTabStream {
+				m.followRecent = true
+			}
 		}
 	case tea.MouseWheelMsg:
 		switch msg.Mouse().Button {
 		case tea.MouseWheelUp:
-			m.followRecent = false
+			if m.activeTab == viewTabStream {
+				m.followRecent = false
+			}
 		case tea.MouseWheelDown:
-			if m.viewport.AtBottom() {
+			if m.activeTab == viewTabStream && m.viewport.AtBottom() {
 				m.followRecent = true
 			}
 		}
@@ -135,7 +149,7 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyCaseStarted(msg.event)
 	case caseFinishedMsg[T]:
 		m.applyCaseFinished(msg.event)
-		m.refreshStream()
+		m.refreshPanel()
 	case batchMsg[T]:
 		needsStreamRefresh := false
 		for _, event := range msg.events {
@@ -148,10 +162,11 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if needsStreamRefresh {
-			m.refreshStream()
+			m.refreshPanel()
 		}
 		if msg.hasAggregate {
 			m.aggregate = components.FormatAggregateTable(msg.aggregate, m.aggregateWidth())
+			m.refreshPanel()
 		}
 	case suiteFinishedMsg[T]:
 		m.completed = msg.summary.Total
@@ -160,9 +175,10 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.skipped = msg.summary.Skipped
 		m.aggregate = components.FormatAggregateTable(msg.summary.Aggregated, m.aggregateWidth())
 		m.finished = true
-		m.refreshStream()
+		m.refreshPanel()
 	case aggregateUpdatedMsg:
 		m.aggregate = components.FormatAggregateTable(msg.snapshot, m.aggregateWidth())
+		m.refreshPanel()
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -170,12 +186,12 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "down", "j", "pgdown", "space", "f", "d", "ctrl+d", "end":
-			if m.viewport.AtBottom() {
+			if m.activeTab == viewTabStream && m.viewport.AtBottom() {
 				m.followRecent = true
 			}
 		}
 	case tea.MouseWheelMsg:
-		if msg.Mouse().Button == tea.MouseWheelDown && m.viewport.AtBottom() {
+		if m.activeTab == viewTabStream && msg.Mouse().Button == tea.MouseWheelDown && m.viewport.AtBottom() {
 			m.followRecent = true
 		}
 	}
@@ -295,11 +311,11 @@ func (m model[T]) panelView() string {
 		}.View()
 	case viewTabStats:
 		return components.Panel{
-			Title:  "stats",
-			Tabs:   m.tabs(),
-			Body:   m.statsBody(),
-			Width:  m.width,
-			Height: m.panelHeight(),
+			Title:    "stats",
+			Tabs:     m.tabs(),
+			Width:    m.width,
+			Height:   m.panelHeight(),
+			Viewport: &m.viewport,
 		}.View()
 	default:
 		return ""
@@ -353,9 +369,24 @@ func (m model[T]) aggregateWidth() int {
 	return m.width - 2
 }
 
-func (m *model[T]) refreshStream() {
-	m.viewport.SetContent(strings.Join(m.streamLines(), "\n"))
-	if m.followRecent {
+func (m *model[T]) refreshPanel() {
+	switch m.activeTab {
+	case viewTabStats:
+		m.viewport.SetContent(m.statsBody())
+	default:
+		m.viewport.SetContent(strings.Join(m.streamLines(), "\n"))
+		if m.followRecent {
+			m.viewport.GotoBottom()
+		}
+	}
+}
+
+func (m *model[T]) resetViewportForTab() {
+	switch m.activeTab {
+	case viewTabStats:
+		m.viewport.GotoTop()
+	default:
+		m.followRecent = true
 		m.viewport.GotoBottom()
 	}
 }

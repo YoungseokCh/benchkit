@@ -25,6 +25,12 @@ import (
 
 ## Changelog
 
+### Unreleased
+
+- Use one shared scrollable TUI panel for both stats and stream tabs. Switching
+  tabs swaps the panel content and resets scroll position instead of preserving
+  separate per-tab scroll state.
+
 ### 0.1.1
 
 Compared with `v0.1.0`:
