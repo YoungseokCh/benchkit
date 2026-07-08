@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	tuipkg "github.com/YoungseokCh/benchkit/cli/tui"
 )
 
 // CLI wraps a Benchmark with an interactive and machine-friendly command-line
@@ -35,7 +36,7 @@ func RecentErrors[T any](result CaseResult[T]) bool {
 }
 
 // Run parses args, optionally prompts for case selection, runs the benchmark,
-// and prints plain text, JSON, or JSONL.
+// and prints plain text or JSONL.
 func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	in := c.In
 	if in == nil {
@@ -54,8 +55,6 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	var caseCSV string
 	var tagCSV string
 	var match string
-	var listOnly bool
-	var jsonOut bool
 	var jsonLines bool
 	var interactive bool
 	var tui bool
@@ -66,8 +65,6 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	flags.StringVar(&caseCSV, "case", "", "comma-separated exact case names")
 	flags.StringVar(&tagCSV, "tag", "", "comma-separated tags; all listed tags are required")
 	flags.StringVar(&match, "match", "", "substring filter for case names")
-	flags.BoolVar(&listOnly, "list", false, "list selected cases without running them")
-	flags.BoolVar(&jsonOut, "json", false, "write final summary as JSON")
 	flags.BoolVar(&jsonLines, "jsonl", false, "stream machine-readable JSON lines")
 	flags.BoolVar(&interactive, "interactive", false, "prompt for case selection before running")
 	flags.BoolVar(&tui, "tui", true, "use the interactive terminal UI when stdin and stdout are terminals")
@@ -89,25 +86,24 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 		}
 	}
 
-	selectedCases := filterCases(c.Benchmark.Cases, names, tags, match)
-	if listOnly {
-		return writeCaseList(out, selectedCases, jsonOut || jsonLines)
-	}
-
 	bench := c.Benchmark
-	bench.Cases = selectedCases
+	bench.Cases = filterCases(c.Benchmark.Cases, names, tags, match)
 
 	var sink EventSink[T]
 	runCtx := ctx
 	var cancel context.CancelFunc
-	var bubble *bubbleSink[T]
+	var bubble *tuipkg.Sink[T]
 	if jsonLines {
 		sink = newJSONLinesSink[T](out)
-	} else if !jsonOut {
+	} else {
 		if tui && isTerminal(out) && isTerminal(in) {
 			runCtx, cancel = context.WithCancel(ctx)
 			defer cancel()
-			bubble = newBubbleSink[T](out, in, cancel, c.RecentFilter)
+			var recent tuipkg.RecentFilter[T]
+			if c.RecentFilter != nil {
+				recent = tuipkg.RecentFilter[T](c.RecentFilter)
+			}
+			bubble = tuipkg.NewSink[T](out, in, cancel, recent)
 			sink = bubble
 		} else {
 			sink = newPlainSink[T](out)
@@ -118,11 +114,6 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 		Parallel: parallel,
 		Sink:     sink,
 	})
-	if jsonOut && !jsonLines {
-		if encodeErr := json.NewEncoder(out).Encode(summary); encodeErr != nil && err == nil {
-			err = encodeErr
-		}
-	}
 	userExited := bubble != nil && bubble.UserExited()
 	if userExited && errors.Is(err, context.Canceled) {
 		err = nil
@@ -222,20 +213,6 @@ func parseSelection(input string, cases []Case) ([]string, error) {
 	}
 
 	return selected, nil
-}
-
-func writeCaseList(out io.Writer, cases []Case, asJSON bool) error {
-	if asJSON {
-		return json.NewEncoder(out).Encode(cases)
-	}
-	for _, c := range cases {
-		if c.Description != "" {
-			fmt.Fprintf(out, "%s\t%s\n", c.Name, c.Description)
-		} else {
-			fmt.Fprintln(out, c.Name)
-		}
-	}
-	return nil
 }
 
 func splitCSV(input string) []string {

@@ -132,10 +132,8 @@ The CLI supports:
 - `-case a,b`: run exact case names.
 - `-tag smoke,linux`: require all listed tags.
 - `-match text`: substring match on case name.
-- `-list`: list selected cases without running.
 - `-interactive`: prompt for case selection.
 - `-tui=false`: disable the terminal UI and print plain progress lines.
-- `-json`: write the final summary as JSON.
 - `-jsonl`: stream lifecycle events as JSON lines.
 
 The default terminal output uses a Bubble Tea TUI with whole-terminal progress,
@@ -212,7 +210,6 @@ durations and pass/fail oracle results. Its custom aggregator counts
 ```sh
 go run ./example/testing -parallel 2
 go run ./example/testing -parallel 16
-go run ./example/testing -json
 go run ./example/testing -jsonl
 go run ./example/testing -interactive
 go run ./example/testing -tag smoke
@@ -224,6 +221,5 @@ aggregator to compute benchmark-specific coverage:
 
 ```sh
 go run ./example/coverage -parallel 16
-go run ./example/coverage -json
 go run ./example/coverage -tag low
 ```

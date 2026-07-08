@@ -1,13 +1,15 @@
-package cli
+package tui
 
 import (
 	"testing"
 
+	benchkit "github.com/YoungseokCh/benchkit"
+
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestBubbleModelViewDoesNotCaptureMouse(t *testing.T) {
-	model := newBubbleModel[struct{}](SuiteEvent{
+func TestModelViewDoesNotCaptureMouse(t *testing.T) {
+	model := newModel[struct{}](benchkit.SuiteEvent{
 		Name:     "copyable",
 		Total:    1,
 		Parallel: 1,
