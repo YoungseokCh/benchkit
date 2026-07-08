@@ -23,6 +23,34 @@ import (
 )
 ```
 
+## Changelog
+
+### 0.1.1
+
+Compared with `v0.1.0`:
+
+- Replaced the pass/fail `Status` model with framework execution `State`
+  values: `StateDone`, `StateError`, and `StateSkip`. Domain verdicts such as
+  pass/fail now belong in the typed `Output` payload and custom aggregators.
+- Replaced `ErrBenchmarkFailed`, `Summary.PassedOK`, `Summary.Passed`, and
+  `Summary.Failed` with error-focused `ErrBenchmarkErrored`, `Summary.OK`,
+  `Summary.Done`, `Summary.Errors`, and `Summary.Skipped`.
+- Removed `CaseReport.Metrics` and `CaseResult.Metrics`; report benchmark data
+  through typed `Output` and aggregate it with `Aggregator[T]`.
+- Replaced TUI `RecentFilter` / `RecentFailed` with `StreamFilter` /
+  `StreamErrors`. Errored cases are always visible, while non-error completed
+  cases are filtered by `StreamFilter`.
+- Reworked the TUI into a tabbed stats/stream interface with stable worker
+  meters, table-rendered stat items, plain/JSON stream modes, and an `a` key to
+  reveal completed results hidden by the stream filter.
+- Changed the TUI stream to show only completed run results. It no longer mixes
+  in start events, aggregate updates, or suite summaries, and plain result lines
+  include the user-defined `Output` payload before the duration.
+- Removed the CLI `-list` and final-summary `-json` flags; use case filters to
+  select runs and `-jsonl` for machine-readable lifecycle output.
+- Updated the bundled examples to put domain pass/fail data in `Output` and to
+  use custom aggregators for benchmark-specific summaries.
+
 ## Core Concepts
 
 - `Case`: one benchmark input. Put lightweight string metadata in `Meta`, or
@@ -161,34 +189,91 @@ through `Snapshot`, and return the final `Summary.Aggregated` payload from
 `Finalize`.
 
 ```go
-type coverageOutput struct {
-	TotalUnits   int `json:"total_units"`
-	CoveredUnits int `json:"covered_units"`
+type coverageFile struct {
+	Path       string
+	TotalUnits int
 }
 
-type coverageAggregator struct {
+type fileCoverageOutput struct {
+	Path         string `json:"path"`
+	TotalUnits   int    `json:"total_units"`
+	CoveredUnits []int  `json:"covered_units"`
+}
+
+type coverageOutput struct {
+	Files []fileCoverageOutput `json:"files"`
+}
+
+type fileCoverageAggregate struct {
 	totalUnits   int
+	covered      []bool
 	coveredUnits int
 }
 
+type coverageAggregator struct {
+	files map[string]*fileCoverageAggregate
+	order []string
+}
+
+func newCoverageAggregator(files []coverageFile) *coverageAggregator {
+	aggregator := &coverageAggregator{files: make(map[string]*fileCoverageAggregate)}
+	for _, file := range files {
+		aggregator.order = append(aggregator.order, file.Path)
+		aggregator.files[file.Path] = &fileCoverageAggregate{
+			totalUnits: file.TotalUnits,
+			covered:    make([]bool, file.TotalUnits),
+		}
+	}
+	return aggregator
+}
+
 func (a *coverageAggregator) Observe(result benchkit.CaseResult[coverageOutput]) error {
-	a.totalUnits += result.Output.TotalUnits
-	a.coveredUnits += result.Output.CoveredUnits
+	if result.State != benchkit.StateDone {
+		return nil
+	}
+	for _, file := range result.Output.Files {
+		aggregate := a.files[file.Path]
+		for _, unit := range file.CoveredUnits {
+			if unit >= 0 && unit < aggregate.totalUnits && !aggregate.covered[unit] {
+				aggregate.covered[unit] = true
+				aggregate.coveredUnits++
+			}
+		}
+	}
 	return nil
 }
 
 func (a *coverageAggregator) Snapshot() any {
+	totalUnits := 0
+	coveredUnits := 0
+	rows := make([][]any, 0, len(a.order))
+	for _, path := range a.order {
+		file := a.files[path]
+		totalUnits += file.totalUnits
+		coveredUnits += file.coveredUnits
+		rows = append(rows, []any{
+			path,
+			file.totalUnits,
+			file.coveredUnits,
+			float64(file.coveredUnits) / float64(file.totalUnits),
+		})
+	}
 	coverage := 0.0
-	if a.totalUnits > 0 {
-		coverage = float64(a.coveredUnits) / float64(a.totalUnits)
+	if totalUnits > 0 {
+		coverage = float64(coveredUnits) / float64(totalUnits)
 	}
 	return benchkit.Stats{
 		{
 			Title: "coverage",
 			Items: []benchkit.StatItem{
-				{Label: "total_units", Value: a.totalUnits},
-				{Label: "covered_units", Value: a.coveredUnits},
+				{Label: "files", Value: len(a.order)},
+				{Label: "total_units", Value: totalUnits},
+				{Label: "covered_units", Value: coveredUnits},
 				{Label: "coverage", Value: coverage},
+			},
+			Table: &benchkit.StatTable{
+				Columns: []string{"file", "total", "covered", "coverage"},
+				Rows:    rows,
 			},
 		},
 	}
