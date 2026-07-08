@@ -1,5 +1,9 @@
 # benchkit
 
+<img width="1297" height="895" alt="image" src="https://github.com/user-attachments/assets/6a500b46-83db-4246-8b7c-f8cb1b367c31" />
+
+
+
 `benchkit` is a Go benchmark harness for arbitrary benchmark suites. You define
 the cases and the per-case runner; benchkit handles filtering, bounded
 parallelism, per-case timing, aggregation, terminal output, and JSON/JSONL
