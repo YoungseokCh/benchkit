@@ -7,7 +7,6 @@ import (
 	benchkit "github.com/YoungseokCh/benchkit"
 	"github.com/YoungseokCh/benchkit/cli/tui/components"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -33,7 +32,7 @@ type model[T any] struct {
 	showHidden   bool
 	activeTab    viewTab
 	streamMode   streamMode
-	viewport     viewport.Model
+	panel        scrollablePanel
 }
 
 type viewTab int
@@ -61,12 +60,11 @@ func newModel[T any](e benchkit.SuiteEvent, streamFilter StreamFilter[T]) model[
 		followRecent: true,
 		activeTab:    viewTabStream,
 		streamMode:   streamModePlain,
-		viewport:     viewport.New(),
+		panel:        newScrollablePanel(),
 		width:        80,
 		height:       24,
 	}
-	model.viewport.MouseWheelDelta = 1
-	model.configureViewport()
+	model.configurePanel()
 	model.refreshPanel()
 	return model
 }
@@ -82,48 +80,48 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.configureViewport()
+		m.configurePanel()
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
+		switch {
+		case keyPressMatches(msg, "q", "ctrl+c"):
 			return m, tea.Quit
-		case "tab":
+		case keyPressMatches(msg, "tab"):
 			m.nextTab()
-			m.configureViewport()
+			m.configurePanel()
 			m.refreshPanel()
 			m.resetViewportForTab()
-		case "shift+tab":
+		case keyPressMatches(msg, "shift+tab"):
 			m.previousTab()
-			m.configureViewport()
+			m.configurePanel()
 			m.refreshPanel()
 			m.resetViewportForTab()
-		case "1", "s":
+		case keyPressMatches(msg, "1", "s"):
 			m.activeTab = viewTabStats
-			m.configureViewport()
+			m.configurePanel()
 			m.refreshPanel()
 			m.resetViewportForTab()
-		case "2", "o":
+		case keyPressMatches(msg, "2", "o"):
 			m.activeTab = viewTabStream
-			m.configureViewport()
+			m.configurePanel()
 			m.refreshPanel()
 			m.resetViewportForTab()
-		case "m":
+		case keyPressMatches(msg, "m"):
 			m.toggleStreamMode()
 			m.refreshPanel()
-		case "p":
+		case keyPressMatches(msg, "p"):
 			m.streamMode = streamModePlain
 			m.refreshPanel()
-		case "r":
+		case keyPressMatches(msg, "r"):
 			m.streamMode = streamModeJSON
 			m.refreshPanel()
-		case "a":
+		case keyPressMatches(msg, "a"):
 			m.showHidden = !m.showHidden
 			m.refreshPanel()
-		case "up", "k", "pgup", "b", "u", "ctrl+u", "home":
+		case keyPressMatches(msg, "up", "k", "pgup", "pageup", "b", "u", "ctrl+u", "home"):
 			if m.activeTab == viewTabStream {
 				m.followRecent = false
 			}
-		case "end":
+		case keyPressMatches(msg, "end"):
 			if m.activeTab == viewTabStream {
 				m.followRecent = true
 			}
@@ -135,7 +133,7 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.followRecent = false
 			}
 		case tea.MouseWheelDown:
-			if m.activeTab == viewTabStream && m.viewport.AtBottom() {
+			if m.activeTab == viewTabStream && m.panel.atBottom() {
 				m.followRecent = true
 			}
 		}
@@ -189,7 +187,7 @@ func (m model[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		handledViewportInput = m.handleViewportMouse(msg)
 	}
 	if !handledViewportInput {
-		m.viewport, cmd = m.viewport.Update(msg)
+		m.panel, cmd = m.panel.update(msg)
 	}
 	return m, cmd
 }
@@ -228,7 +226,7 @@ func (m *model[T]) applyCaseFinished(event benchkit.WorkerCaseResult[T]) {
 }
 
 func (m model[T]) View() tea.View {
-	m.configureViewport()
+	m.configurePanel()
 
 	panel := m.panelView()
 
@@ -261,14 +259,12 @@ func (m model[T]) View() tea.View {
 	return view
 }
 
-func (m *model[T]) configureViewport() {
+func (m *model[T]) configurePanel() {
 	width := m.width
 	if width <= 0 {
 		width = 80
 	}
-	viewportWidth, height := components.PanelViewportSize(width, m.panelHeight())
-	m.viewport.SetWidth(viewportWidth)
-	m.viewport.SetHeight(height)
+	m.panel.configure(width, m.panelHeight())
 }
 
 func (m model[T]) workerGrid() components.WorkerGrid {
@@ -291,21 +287,9 @@ func (m model[T]) panelHeight() int {
 func (m model[T]) panelView() string {
 	switch m.activeTab {
 	case viewTabStream:
-		return components.Panel{
-			Title:    "stream",
-			Tabs:     m.tabs(),
-			Width:    m.width,
-			Height:   m.panelHeight(),
-			Viewport: &m.viewport,
-		}.View()
+		return m.panel.view("stream", m.tabs(), m.width, m.panelHeight())
 	case viewTabStats:
-		return components.Panel{
-			Title:    "stats",
-			Tabs:     m.tabs(),
-			Width:    m.width,
-			Height:   m.panelHeight(),
-			Viewport: &m.viewport,
-		}.View()
+		return m.panel.view("stats", m.tabs(), m.width, m.panelHeight())
 	default:
 		return ""
 	}
@@ -361,11 +345,11 @@ func (m model[T]) aggregateWidth() int {
 func (m *model[T]) refreshPanel() {
 	switch m.activeTab {
 	case viewTabStats:
-		m.viewport.SetContent(m.statsBody())
+		m.panel.setContent(m.statsBody(), true)
 	default:
-		m.viewport.SetContent(strings.Join(m.streamLines(), "\n"))
+		m.panel.setContent(strings.Join(m.streamLines(), "\n"), false)
 		if m.followRecent {
-			m.viewport.GotoBottom()
+			m.panel.gotoBottom()
 		}
 	}
 }
@@ -373,62 +357,41 @@ func (m *model[T]) refreshPanel() {
 func (m *model[T]) resetViewportForTab() {
 	switch m.activeTab {
 	case viewTabStats:
-		m.viewport.GotoTop()
+		m.panel.gotoTop()
 	default:
 		m.followRecent = true
-		m.viewport.GotoBottom()
+		m.panel.gotoBottom()
 	}
 }
 
 func (m *model[T]) handleViewportKey(msg tea.KeyPressMsg) bool {
-	m.configureViewport()
-	switch msg.String() {
-	case "down", "j":
-		m.viewport.ScrollDown(1)
-	case "up", "k":
-		m.viewport.ScrollUp(1)
-	case "pgdown", "pagedown", "space", "f":
-		m.viewport.PageDown()
-	case "pgup", "pageup", "b":
-		m.viewport.PageUp()
-	case "d", "ctrl+d":
-		m.viewport.HalfPageDown()
-	case "u", "ctrl+u":
-		m.viewport.HalfPageUp()
-	case "home", "g":
-		m.viewport.GotoTop()
-	case "end", "G":
-		m.viewport.GotoBottom()
-	default:
-		switch msg.Key().Code {
-		case tea.KeyDown:
-			m.viewport.ScrollDown(1)
-		case tea.KeyUp:
-			m.viewport.ScrollUp(1)
-		case tea.KeyPgDown:
-			m.viewport.PageDown()
-		case tea.KeyPgUp:
-			m.viewport.PageUp()
-		case tea.KeyHome:
-			m.viewport.GotoTop()
-		case tea.KeyEnd:
-			m.viewport.GotoBottom()
-		default:
-			return false
-		}
+	m.configurePanel()
+	if !m.panel.handleKey(msg) {
+		return false
 	}
 	m.updateFollowRecentAfterScroll()
 	return true
 }
 
+func keyPressMatches(msg tea.KeyPressMsg, bindings ...string) bool {
+	key := msg.Key()
+	names := []string{msg.String(), msg.Keystroke(), key.Text}
+	if key.Code != 0 {
+		names = append(names, string(key.Code))
+	}
+	for _, name := range names {
+		for _, binding := range bindings {
+			if name == binding {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (m *model[T]) handleViewportMouse(msg tea.MouseWheelMsg) bool {
-	m.configureViewport()
-	switch msg.Mouse().Button {
-	case tea.MouseWheelUp:
-		m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
-	case tea.MouseWheelDown:
-		m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
-	default:
+	m.configurePanel()
+	if !m.panel.handleMouse(msg) {
 		return false
 	}
 	m.updateFollowRecentAfterScroll()
@@ -439,7 +402,7 @@ func (m *model[T]) updateFollowRecentAfterScroll() {
 	if m.activeTab != viewTabStream {
 		return
 	}
-	m.followRecent = m.viewport.AtBottom()
+	m.followRecent = m.panel.atBottom()
 }
 
 func (m model[T]) streamLines() []string {

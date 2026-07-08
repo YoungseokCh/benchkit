@@ -141,37 +141,59 @@ func TestModelStatsTabUsesSharedScrollableViewport(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	m = updated.(model[struct{}])
 
-	if m.viewport.YOffset() != 0 {
-		t.Fatalf("stats viewport starts at offset %d, want 0", m.viewport.YOffset())
+	if m.panel.yOffset() != 0 {
+		t.Fatalf("stats viewport starts at offset %d, want 0", m.panel.yOffset())
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = updated.(model[struct{}])
-	if m.viewport.YOffset() == 0 {
+	if m.panel.yOffset() == 0 {
 		t.Fatal("stats viewport did not scroll on j")
 	}
-	m.viewport.GotoTop()
+	m.panel.gotoTop()
 
-	m.viewport.SetHeight(100)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+	m = updated.(model[struct{}])
+	if m.panel.yOffset() == 0 {
+		t.Fatal("stats viewport did not scroll on code-only j")
+	}
+	m.panel.gotoTop()
+
+	m.panel.setHeight(100)
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = updated.(model[struct{}])
-	if m.viewport.YOffset() == 0 {
+	if m.panel.yOffset() == 0 {
 		t.Fatal("stats viewport did not scroll after stale viewport height")
 	}
-	m.viewport.GotoTop()
+	m.panel.gotoTop()
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	m = updated.(model[struct{}])
-	if m.viewport.YOffset() == 0 {
+	if m.panel.yOffset() == 0 {
 		t.Fatal("stats viewport did not scroll on page down")
+	}
+	scrolledOffset := m.panel.yOffset()
+
+	updated, _ = m.Update(aggregateUpdatedMsg{snapshot: benchkit.Stats{
+		{
+			Title: "coverage",
+			Table: &benchkit.StatTable{
+				Columns: []string{"file", "total", "covered", "coverage"},
+				Rows:    rows,
+			},
+		},
+	}})
+	m = updated.(model[struct{}])
+	if m.panel.yOffset() != scrolledOffset {
+		t.Fatalf("stats viewport offset after refresh = %d, want %d", m.panel.yOffset(), scrolledOffset)
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	m = updated.(model[struct{}])
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	m = updated.(model[struct{}])
-	if m.viewport.YOffset() != 0 {
-		t.Fatalf("stats viewport preserved tab scroll offset %d, want reset to 0", m.viewport.YOffset())
+	if m.panel.yOffset() != 0 {
+		t.Fatalf("stats viewport preserved tab scroll offset %d, want reset to 0", m.panel.yOffset())
 	}
 }
 

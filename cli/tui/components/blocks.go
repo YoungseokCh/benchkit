@@ -128,8 +128,11 @@ func Footer(finished bool, hints string) string {
 
 func scrollbarCell(view viewport.Model, row int, height int) string {
 	total := view.TotalLineCount()
-	if height <= 0 || total <= height {
-		return mutedStyle.Render(" ")
+	if height <= 0 {
+		return ""
+	}
+	if total <= height {
+		return mutedStyle.Render("│")
 	}
 
 	thumbHeight := height * height / total

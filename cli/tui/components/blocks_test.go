@@ -38,3 +38,23 @@ func TestPanelSizesViewportBeforeRenderingScrollbar(t *testing.T) {
 		t.Fatalf("rendered panel does not show scrollbar thumb:\n%s", rendered)
 	}
 }
+
+func TestPanelRendersScrollbarTrackWhenViewportFits(t *testing.T) {
+	view := viewport.New()
+	view.SetContent("one\nline")
+
+	rendered := Panel{
+		Title:    "fitting",
+		Width:    30,
+		Height:   6,
+		Viewport: &view,
+	}.View()
+
+	lines := strings.Split(rendered, "\n")
+	if len(lines) < 2 || strings.Count(lines[1], "│") < 3 {
+		t.Fatalf("rendered panel does not show scrollbar track:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "█") {
+		t.Fatalf("rendered panel shows scrollbar thumb for fitting content:\n%s", rendered)
+	}
+}
