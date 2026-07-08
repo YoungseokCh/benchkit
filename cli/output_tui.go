@@ -341,17 +341,21 @@ func (m bubbleModel[T]) View() tea.View {
 		footer = bubbleMutedStyle.Render("scroll arrows/j/k/pageup/pagedown  q/ctrl+c exits")
 	}
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	sections := []string{
 		"",
 		m.progressBar(),
-		aggregate,
 		"",
 		m.workerView(),
+	}
+	if aggregate != "" {
+		sections = append(sections, aggregate)
+	}
+	sections = append(sections,
 		"",
 		recent,
 		footer,
 	)
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 	view := tea.NewView(content)
 	view.AltScreen = true
 	// Let the terminal own mouse drag selection so users can copy text from the TUI.
@@ -440,7 +444,15 @@ func (m bubbleModel[T]) workerCellWidth() int {
 
 func (m bubbleModel[T]) progressBar() string {
 	prefix := bubbleTitleStyle.Render(m.name) + "  "
-	suffix := fmt.Sprintf("  %3d%%  %d/%d  elapsed %s  eta %s", m.percentComplete(), m.completed, m.total, formatDuration(time.Since(m.startedAt)), m.suiteETA())
+	suffix := fmt.Sprintf(
+		"  %3d%%  %d/%d  %s  elapsed %s  eta %s",
+		m.percentComplete(),
+		m.completed,
+		m.total,
+		m.stateSummary(),
+		formatDuration(time.Since(m.startedAt)),
+		m.suiteETA(),
+	)
 	width := m.width - lipgloss.Width(prefix) - lipgloss.Width(suffix)
 	if width < 10 {
 		width = 10
@@ -456,6 +468,10 @@ func (m bubbleModel[T]) progressBar() string {
 	empty := width - filled
 	bar := bubbleMeterDoneStyle.Render(strings.Repeat("█", filled)) + bubbleMeterTodoStyle.Render(strings.Repeat("░", empty))
 	return prefix + bar + suffix
+}
+
+func (m bubbleModel[T]) stateSummary() string {
+	return fmt.Sprintf("done %d  err %d  skip %d", m.done, m.errors, m.skipped)
 }
 
 func (m bubbleModel[T]) suiteETA() string {
