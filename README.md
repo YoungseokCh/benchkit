@@ -29,6 +29,13 @@ import (
 
 ## Changelog
 
+### Unreleased
+
+- Expose the CLI-selected result directory to benchmark code with
+  `RunOptions.ResultDir`, `benchkit.ResultDir(ctx)`, and `Summary.ResultDir`.
+- Add `benchkitcli.CLI.ResultStore` so CLI summary load/save behavior can be
+  customized instead of always using `result-dir/summary.json`.
+
 ### 0.1.2
 
 Compared with `v0.1.1`:
@@ -195,6 +202,12 @@ The CLI supports:
 - `-update`: load `summary.json` from `-result-dir`, rerun the selected cases,
   and rewrite the whole merged result.
 
+The CLI also passes `-result-dir` into the benchmark run. Case runners can read
+it with `benchkit.ResultDir(ctx)`, and aggregate functions can read it from
+`summary.ResultDir`. To store the summary somewhere other than the default
+`DIR/summary.json`, set `benchkitcli.CLI.ResultStore` and implement custom
+`Load` and `Save` methods for your result directory layout.
+
 See `example/incremental` for a runnable incremental update demo.
 
 The default terminal output uses a Bubble Tea TUI with whole-terminal progress,
@@ -341,10 +354,13 @@ go run ./example/testing -tag smoke
 go run ./example/testing -match job-04
 ```
 
-Run the coverage example. It uses a custom aggregate function to compute
-benchmark-specific coverage:
+Run the coverage example. Each case writes
+`coverage/<case>.coverage.xml` under `-result-dir`, while the custom aggregate
+function reads those reports through `Summary.ResultDir` to compute
+benchmark-specific coverage. The case `Output` only carries lightweight run
+metadata:
 
 ```sh
-go run ./example/coverage -parallel 16
-go run ./example/coverage -tag low
+go run ./example/coverage -parallel 16 -result-dir /tmp/benchkit-coverage-demo
+go run ./example/coverage -tag low -result-dir /tmp/benchkit-coverage-demo
 ```

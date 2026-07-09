@@ -22,9 +22,17 @@ import (
 type CLI[T any] struct {
 	Benchmark    Benchmark[T]
 	StreamFilter StreamFilter[T]
+	ResultStore  ResultStore[T]
 	In           io.Reader
 	Out          io.Writer
 	Err          io.Writer
+}
+
+// ResultStore controls how the CLI loads and saves summaries under -result-dir.
+// The default store writes result-dir/summary.json.
+type ResultStore[T any] interface {
+	Load(resultDir string) (Summary[T], error)
+	Save(resultDir string, summary Summary[T]) error
 }
 
 // StreamFilter decides whether a non-error completed case should appear in the
@@ -90,6 +98,10 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 
 	names := splitCSV(caseCSV)
 	tags := splitCSV(tagCSV)
+	store := c.ResultStore
+	if store == nil {
+		store = fileResultStore[T]{}
+	}
 
 	if interactive {
 		selected, err := promptCases(in, out, c.Benchmark.Cases)
@@ -125,16 +137,17 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 	}
 
 	runOpts := RunOptions[T]{
-		Parallel: parallel,
-		Names:    names,
-		Tags:     tags,
-		Match:    match,
-		Sink:     sink,
+		Parallel:  parallel,
+		Names:     names,
+		Tags:      tags,
+		Match:     match,
+		ResultDir: resultDir,
+		Sink:      sink,
 	}
 	var summary Summary[T]
 	var err error
 	if update {
-		previous, loadErr := loadSummary[T](resultDir)
+		previous, loadErr := store.Load(resultDir)
 		if loadErr != nil {
 			return loadErr
 		}
@@ -147,7 +160,7 @@ func (c CLI[T]) Run(ctx context.Context, args []string) error {
 		err = nil
 	}
 	if err == nil && !userExited {
-		if saveErr := saveSummary(resultDir, summary); saveErr != nil {
+		if saveErr := store.Save(resultDir, summary); saveErr != nil {
 			err = saveErr
 		}
 	}

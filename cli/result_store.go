@@ -10,6 +10,16 @@ import (
 
 const resultSummaryFile = "summary.json"
 
+type fileResultStore[T any] struct{}
+
+func (fileResultStore[T]) Load(dir string) (Summary[T], error) {
+	return loadSummary[T](dir)
+}
+
+func (fileResultStore[T]) Save(dir string, summary Summary[T]) error {
+	return saveSummary(dir, summary)
+}
+
 func defaultResultDir(now time.Time) string {
 	return filepath.Join("result", now.Format("20060102-150405"))
 }

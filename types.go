@@ -42,6 +42,15 @@ type CaseReport[T any] struct {
 // reporting around it.
 type Runner[T any] func(context.Context, Case) (CaseReport[T], error)
 
+type resultDirContextKey struct{}
+
+// ResultDir returns the result directory configured for the current run, if
+// one was supplied through RunOptions. CLI runs set this from -result-dir.
+func ResultDir(ctx context.Context) string {
+	resultDir, _ := ctx.Value(resultDirContextKey{}).(string)
+	return resultDir
+}
+
 // AggregateFunc returns an arbitrary machine-readable summary for the results
 // collected so far. Use this for benchmark-domain aggregates such as coverage,
 // precision/recall, latency percentiles, cost, or any other result model
@@ -115,7 +124,11 @@ type RunOptions[T any] struct {
 	Names    []string
 	Tags     []string
 	Match    string
-	Sink     EventSink[T]
+	// ResultDir is a caller-owned directory for persisted result data and
+	// benchmark artifacts. The runner exposes it to cases through ResultDir(ctx)
+	// and to aggregators through Summary.ResultDir.
+	ResultDir string
+	Sink      EventSink[T]
 }
 
 // CaseResult is the complete result for one case.
@@ -133,6 +146,7 @@ type CaseResult[T any] struct {
 // Summary is the framework-level run result.
 type Summary[T any] struct {
 	Name       string          `json:"name"`
+	ResultDir  string          `json:"result_dir,omitempty"`
 	Total      int             `json:"total"`
 	Done       int             `json:"done"`
 	Errors     int             `json:"errors"`

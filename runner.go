@@ -19,6 +19,9 @@ func (b Benchmark[T]) run(ctx context.Context, opts RunOptions[T], aggregate Agg
 	if err := b.validate(); err != nil {
 		return Summary[T]{Name: b.Name}, err
 	}
+	if opts.ResultDir != "" {
+		ctx = context.WithValue(ctx, resultDirContextKey{}, opts.ResultDir)
+	}
 
 	cases := filterCases(b.Cases, opts.Names, opts.Tags, opts.Match)
 	parallel := normalizeParallel(opts.Parallel, len(cases))
@@ -30,6 +33,7 @@ func (b Benchmark[T]) run(ctx context.Context, opts RunOptions[T], aggregate Agg
 	started := time.Now()
 	summary := Summary[T]{
 		Name:      b.Name,
+		ResultDir: opts.ResultDir,
 		Total:     len(cases),
 		StartedAt: started,
 		Results:   make([]CaseResult[T], 0, len(cases)),

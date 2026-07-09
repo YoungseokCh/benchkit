@@ -2,6 +2,7 @@ package benchkit
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -65,6 +66,39 @@ func TestRunIncrementalReplacesResultsBeforeAggregating(t *testing.T) {
 	}
 	if aggregate["done"] != 2 || aggregate["errors"] != 0 || aggregate["sum"] != 21 {
 		t.Fatalf("unexpected aggregate: %#v", aggregate)
+	}
+}
+
+func TestRunOptionsResultDirIsVisibleToCasesAndAggregates(t *testing.T) {
+	resultDir := t.TempDir()
+	aggregateCalls := 0
+	bench := Benchmark[int]{
+		Name:  "result-dir",
+		Cases: []Case{{Name: "a"}},
+		Aggregate: func(summary Summary[int]) (any, error) {
+			aggregateCalls++
+			if summary.ResultDir != resultDir {
+				return nil, fmt.Errorf("aggregate saw result dir %q", summary.ResultDir)
+			}
+			return nil, nil
+		},
+		RunCase: func(ctx context.Context, _ Case) (CaseReport[int], error) {
+			if got := ResultDir(ctx); got != resultDir {
+				return CaseReport[int]{}, fmt.Errorf("case saw result dir %q", got)
+			}
+			return CaseReport[int]{Output: 1}, nil
+		},
+	}
+
+	summary, err := bench.Run(context.Background(), RunOptions[int]{ResultDir: resultDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.ResultDir != resultDir {
+		t.Fatalf("summary saw result dir %q", summary.ResultDir)
+	}
+	if aggregateCalls == 0 {
+		t.Fatal("aggregate was not called")
 	}
 }
 

@@ -64,6 +64,7 @@ func (b Benchmark[T]) mergeSummaries(previous Summary[T], partial Summary[T]) Su
 
 	merged := Summary[T]{
 		Name:       b.Name,
+		ResultDir:  partial.ResultDir,
 		Total:      len(b.Cases),
 		StartedAt:  partial.StartedAt,
 		FinishedAt: partial.FinishedAt,

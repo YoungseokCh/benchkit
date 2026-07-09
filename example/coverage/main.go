@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,14 +19,19 @@ type coverageFile struct {
 	TotalUnits int
 }
 
-type fileCoverageOutput struct {
-	Path         string `json:"path"`
-	TotalUnits   int    `json:"total_units"`
-	CoveredUnits []int  `json:"covered_units"`
+type coverageReport struct {
+	XMLName xml.Name             `xml:"coverage"`
+	Files   []fileCoverageReport `xml:"file"`
+}
+
+type fileCoverageReport struct {
+	Path         string `xml:"path,attr"`
+	TotalUnits   int    `xml:"total_units,attr"`
+	CoveredUnits []int  `xml:"covered_units>unit"`
 }
 
 type coverageOutput struct {
-	Files []fileCoverageOutput `json:"files"`
+	ReportedFiles int `json:"reported_files"`
 }
 
 type coverageAggregator struct {
@@ -52,11 +59,15 @@ func newCoverageAggregator(files []coverageFile) *coverageAggregator {
 	return aggregator
 }
 
-func (a *coverageAggregator) add(result benchkit.CaseResult[coverageOutput]) error {
+func (a *coverageAggregator) add(resultDir string, result benchkit.CaseResult[coverageOutput]) error {
 	if result.State != benchkit.StateDone {
 		return nil
 	}
-	for _, file := range result.Output.Files {
+	report, err := readCoverageReport(coverageReportPath(resultDir, result.Case.Name))
+	if err != nil {
+		return err
+	}
+	for _, file := range report.Files {
 		aggregate, ok := a.files[file.Path]
 		if !ok {
 			return fmt.Errorf("unknown coverage file %q", file.Path)
@@ -122,9 +133,12 @@ func (f fileCoverageAggregate) coverage() float64 {
 
 func coverageAggregate(files []coverageFile) benchkit.AggregateFunc[coverageOutput] {
 	return func(summary benchkit.Summary[coverageOutput]) (any, error) {
+		if summary.ResultDir == "" {
+			return nil, fmt.Errorf("coverage aggregate requires summary result dir")
+		}
 		aggregator := newCoverageAggregator(files)
 		for _, result := range summary.Results {
-			if err := aggregator.add(result); err != nil {
+			if err := aggregator.add(summary.ResultDir, result); err != nil {
 				return nil, err
 			}
 		}
@@ -150,7 +164,7 @@ func main() {
 			if err != nil {
 				return benchkit.CaseReport[coverageOutput]{}, err
 			}
-			output, ok := outputs[c.Name]
+			report, ok := outputs[c.Name]
 			if !ok {
 				return benchkit.CaseReport[coverageOutput]{}, fmt.Errorf("missing coverage output for %s", c.Name)
 			}
@@ -161,8 +175,15 @@ func main() {
 			case <-ctx.Done():
 				return benchkit.CaseReport[coverageOutput]{}, ctx.Err()
 			case <-timer.C:
+				resultDir := benchkit.ResultDir(ctx)
+				if resultDir == "" {
+					return benchkit.CaseReport[coverageOutput]{}, fmt.Errorf("coverage example requires result dir")
+				}
+				if err := writeCoverageReport(coverageReportPath(resultDir, c.Name), report); err != nil {
+					return benchkit.CaseReport[coverageOutput]{}, err
+				}
 				return benchkit.CaseReport[coverageOutput]{
-					Output: output,
+					Output: coverageOutput{ReportedFiles: len(report.Files)},
 				}, nil
 			}
 		},
@@ -172,19 +193,19 @@ func main() {
 	os.Exit(benchkitcli.ExitCode(err))
 }
 
-func makeCases(count int, files []coverageFile) ([]benchkit.Case, map[string]coverageOutput) {
+func makeCases(count int, files []coverageFile) ([]benchkit.Case, map[string]coverageReport) {
 	cases := make([]benchkit.Case, 0, count)
-	outputs := make(map[string]coverageOutput, count)
+	outputs := make(map[string]coverageReport, count)
 	for i := 1; i <= count; i++ {
 		name := "scenario-" + leftPad(strconv.Itoa(i), 3)
 		touchedFiles := 1 + (i % 3)
-		output := coverageOutput{Files: make([]fileCoverageOutput, 0, touchedFiles)}
+		report := coverageReport{Files: make([]fileCoverageReport, 0, touchedFiles)}
 		coveredUnitCount := 0
 		for offset := 0; offset < touchedFiles; offset++ {
 			file := files[(i+offset)%len(files)]
 			unitCount := 2 + ((i*5 + offset*3) % 8)
 			coveredUnitCount += unitCount
-			output.Files = append(output.Files, fileCoverageOutput{
+			report.Files = append(report.Files, fileCoverageReport{
 				Path:         file.Path,
 				TotalUnits:   file.TotalUnits,
 				CoveredUnits: makeCoveredUnits(file.TotalUnits, i+offset*31, unitCount),
@@ -209,9 +230,51 @@ func makeCases(count int, files []coverageFile) ([]benchkit.Case, map[string]cov
 				"ms": strconv.Itoa(ms),
 			},
 		})
-		outputs[name] = output
+		outputs[name] = report
 	}
 	return cases, outputs
+}
+
+func coverageReportPath(resultDir string, caseName string) string {
+	return filepath.Join(resultDir, "coverage", caseName+".coverage.xml")
+}
+
+func writeCoverageReport(path string, report coverageReport) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create coverage report directory: %w", err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create coverage report %s: %w", path, err)
+	}
+	defer file.Close()
+
+	encoder := xml.NewEncoder(file)
+	encoder.Indent("", "  ")
+	if _, err := file.WriteString(xml.Header); err != nil {
+		return fmt.Errorf("write coverage report header %s: %w", path, err)
+	}
+	if err := encoder.Encode(report); err != nil {
+		return fmt.Errorf("encode coverage report %s: %w", path, err)
+	}
+	if _, err := file.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("finish coverage report %s: %w", path, err)
+	}
+	return nil
+}
+
+func readCoverageReport(path string) (coverageReport, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return coverageReport{}, fmt.Errorf("open coverage report %s: %w", path, err)
+	}
+	defer file.Close()
+
+	var report coverageReport
+	if err := xml.NewDecoder(file).Decode(&report); err != nil {
+		return coverageReport{}, fmt.Errorf("decode coverage report %s: %w", path, err)
+	}
+	return report, nil
 }
 
 func makeCoveredUnits(totalUnits int, seed int, target int) []int {
