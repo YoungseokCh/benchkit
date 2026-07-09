@@ -1,8 +1,8 @@
 # benchkit
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/YoungseokCh/benchkit.svg)](https://pkg.go.dev/github.com/YoungseokCh/benchkit)
+
 <img width="1297" height="895" alt="image" src="https://github.com/user-attachments/assets/6a500b46-83db-4246-8b7c-f8cb1b367c31" />
-
-
 
 `benchkit` is a Go benchmark harness for arbitrary benchmark suites. You define
 the cases and the per-case runner; benchkit handles filtering, bounded
@@ -26,64 +26,6 @@ import (
 	benchkitcli "github.com/YoungseokCh/benchkit/cli"
 )
 ```
-
-## Changelog
-
-### Unreleased
-
-- Expose the CLI-selected result directory to benchmark code with
-  `RunOptions.ResultDir`, `benchkit.ResultDir(ctx)`, and `Summary.ResultDir`.
-- Add `benchkitcli.CLI.ResultStore` so CLI summary load/save behavior can be
-  customized instead of always using `result-dir/summary.json`.
-
-### 0.1.2
-
-Compared with `v0.1.1`:
-
-- Add incremental result updates with `Benchmark.RunIncremental`, which reruns
-  selected cases, merges them into a previous whole-suite summary, and
-  recomputes the aggregate from the merged results.
-- Replace stateful aggregator configuration with `Benchmark.Aggregate`, a
-  stateless function that computes aggregate output from the current `Summary`.
-- Add CLI result persistence: runs write `summary.json` under `-result-dir`
-  defaulting to `result/<current-time>`, and `-update -result-dir DIR` updates
-  that saved whole-suite result with selected rerun cases.
-- Reject duplicate case names during benchmark validation because incremental
-  updates use case names as the result merge key.
-- Add `example/incremental` with a runnable end-to-end update demo.
-- Use one shared scrollable TUI panel for both stats and stream tabs. Switching
-  tabs swaps the panel content and resets scroll position instead of preserving
-  separate per-tab scroll state.
-- Refine TUI panel scrolling so stats refreshes keep their scroll position,
-  code-only key events are handled consistently, and fitted content still shows
-  the scrollbar track without a thumb.
-
-### 0.1.1
-
-Compared with `v0.1.0`:
-
-- Replaced the pass/fail `Status` model with framework execution `State`
-  values: `StateDone`, `StateError`, and `StateSkip`. Domain verdicts such as
-  pass/fail now belong in the typed `Output` payload and custom aggregate
-  functions.
-- Replaced `ErrBenchmarkFailed`, `Summary.PassedOK`, `Summary.Passed`, and
-  `Summary.Failed` with error-focused `ErrBenchmarkErrored`, `Summary.OK`,
-  `Summary.Done`, `Summary.Errors`, and `Summary.Skipped`.
-- Removed `CaseReport.Metrics` and `CaseResult.Metrics`; report benchmark data
-  through typed `Output` and aggregate it with custom aggregation.
-- Replaced TUI `RecentFilter` / `RecentFailed` with `StreamFilter` /
-  `StreamErrors`. Errored cases are always visible, while non-error completed
-  cases are filtered by `StreamFilter`.
-- Reworked the TUI into a tabbed stats/stream interface with stable worker
-  meters, table-rendered stat items, plain/JSON stream modes, and an `a` key to
-  reveal completed results hidden by the stream filter.
-- Changed the TUI stream to show only completed run results. It no longer mixes
-  in start events, aggregate updates, or suite summaries, and plain result lines
-  include the user-defined `Output` payload before the duration.
-- Removed the CLI `-list` and final-summary `-json` flags; use case filters to
-  select runs and `-jsonl` for machine-readable lifecycle output.
-- Updated the bundled examples to put domain pass/fail data in `Output` and to
-  use custom aggregate functions for benchmark-specific summaries.
 
 ## Core Concepts
 
@@ -364,3 +306,61 @@ metadata:
 go run ./example/coverage -parallel 16 -result-dir /tmp/benchkit-coverage-demo
 go run ./example/coverage -tag low -result-dir /tmp/benchkit-coverage-demo
 ```
+
+## Changelog
+
+### Unreleased
+
+- Expose the CLI-selected result directory to benchmark code with
+  `RunOptions.ResultDir`, `benchkit.ResultDir(ctx)`, and `Summary.ResultDir`.
+- Add `benchkitcli.CLI.ResultStore` so CLI summary load/save behavior can be
+  customized instead of always using `result-dir/summary.json`.
+
+### 0.1.2
+
+Compared with `v0.1.1`:
+
+- Add incremental result updates with `Benchmark.RunIncremental`, which reruns
+  selected cases, merges them into a previous whole-suite summary, and
+  recomputes the aggregate from the merged results.
+- Replace stateful aggregator configuration with `Benchmark.Aggregate`, a
+  stateless function that computes aggregate output from the current `Summary`.
+- Add CLI result persistence: runs write `summary.json` under `-result-dir`
+  defaulting to `result/<current-time>`, and `-update -result-dir DIR` updates
+  that saved whole-suite result with selected rerun cases.
+- Reject duplicate case names during benchmark validation because incremental
+  updates use case names as the result merge key.
+- Use one shared scrollable TUI panel for both stats and stream tabs. Switching
+  tabs swaps the panel content and resets scroll position instead of preserving
+  separate per-tab scroll state.
+- Refine TUI panel scrolling so stats refreshes keep their scroll position,
+  code-only key events are handled consistently, and fitted content still shows
+  the scrollbar track without a thumb.
+
+### 0.1.1
+
+Compared with `v0.1.0`:
+
+- Replaced the pass/fail `Status` model with framework execution `State`
+  values: `StateDone`, `StateError`, and `StateSkip`. Domain verdicts such as
+  pass/fail now belong in the typed `Output` payload and custom aggregate
+  functions.
+- Replaced `ErrBenchmarkFailed`, `Summary.PassedOK`, `Summary.Passed`, and
+  `Summary.Failed` with error-focused `ErrBenchmarkErrored`, `Summary.OK`,
+  `Summary.Done`, `Summary.Errors`, and `Summary.Skipped`.
+- Removed `CaseReport.Metrics` and `CaseResult.Metrics`; report benchmark data
+  through typed `Output` and aggregate it with custom aggregation.
+- Replaced TUI `RecentFilter` / `RecentFailed` with `StreamFilter` /
+  `StreamErrors`. Errored cases are always visible, while non-error completed
+  cases are filtered by `StreamFilter`.
+- Reworked the TUI into a tabbed stats/stream interface with stable worker
+  meters, table-rendered stat items, plain/JSON stream modes, and an `a` key to
+  reveal completed results hidden by the stream filter.
+- Changed the TUI stream to show only completed run results. It no longer mixes
+  in start events, aggregate updates, or suite summaries, and plain result lines
+  include the user-defined `Output` payload before the duration.
+- Removed the CLI `-list` and final-summary `-json` flags; use case filters to
+  select runs and `-jsonl` for machine-readable lifecycle output.
+- Updated the bundled examples to put domain pass/fail data in `Output` and to
+  use custom aggregate functions for benchmark-specific summaries.
+
